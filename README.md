@@ -39,6 +39,17 @@ ssh -N -L 8787:127.0.0.1:8787 user@vps
 
 Add a game and upload the account list in the panel. Configure Telegram or Discord under bot settings. Run the installer without `--orchestrator` for standalone, single-game mining. See the [VPS guide](vps/README.md) for startup, updates, and rollback.
 
+### 🐳 Build directly on the VPS
+
+Use the public source if the prebuilt image is unavailable. This Compose setup stores data in `./data-orchestrator`. Run these commands on Linux.
+
+```bash
+git clone https://github.com/Xyloni/tdm-light-orchestrator.git
+cd tdm-light-orchestrator
+sudo install -d -m 0700 -o 10001 -g 10001 data-orchestrator
+sudo docker compose -f docker-compose.orchestrator.yml up -d --build
+```
+
 ### 🪟 Windows and development
 
 Start `start-orchestrator.bat` with Go 1.22 or newer in PATH, then open the local panel. Use `start.bat` for standalone mode.
@@ -80,6 +91,17 @@ ssh -N -L 8787:127.0.0.1:8787 user@vps
 ```
 
 Добавьте игру, загрузите аккаунты и подключите бота в панели. В Telegram отправьте `/start` для меню. В Discord начните с `/help` в личке бота. Для самостоятельного майнера одной игры запустите установщик без `--orchestrator`.
+
+### 🐳 Сборка из исходников на VPS
+
+Если готовый образ ещё недоступен, запустите сборку из публичного репозитория на Linux. Этот вариант хранит данные в `./data-orchestrator`.
+
+```bash
+git clone https://github.com/Xyloni/tdm-light-orchestrator.git
+cd tdm-light-orchestrator
+sudo install -d -m 0700 -o 10001 -g 10001 data-orchestrator
+sudo docker compose -f docker-compose.orchestrator.yml up -d --build
+```
 
 ### 🔧 Обновление и откат
 
