@@ -105,9 +105,9 @@ func Test1000WorkersRecoverFromSharedHLSOutage(t *testing.T) {
 			}
 		}(i, w)
 	}
-	wait := func(check func() bool) {
+	wait := func(timeout time.Duration, check func() bool) {
 		t.Helper()
-		deadline := time.Now().Add(10 * time.Second)
+		deadline := time.Now().Add(timeout)
 		for !check() {
 			if time.Now().After(deadline) {
 				t.Fatal("timed out waiting for test phase")
@@ -115,7 +115,8 @@ func Test1000WorkersRecoverFromSharedHLSOutage(t *testing.T) {
 			time.Sleep(5 * time.Millisecond)
 		}
 	}
-	wait(func() bool {
+	// Startup schedules all 1000 accounts and instruments each request under -race.
+	wait(30*time.Second, func() bool {
 		for i := range probes {
 			if probes[i].calls[0].Load() < 2 {
 				return false
@@ -129,7 +130,7 @@ func Test1000WorkersRecoverFromSharedHLSOutage(t *testing.T) {
 		m.hlsRetries.failed(time.Now())
 	}
 	phase.Store(1)
-	wait(func() bool {
+	wait(10*time.Second, func() bool {
 		for i := range failed {
 			if !failed[i].Load() {
 				return false
@@ -141,7 +142,7 @@ func Test1000WorkersRecoverFromSharedHLSOutage(t *testing.T) {
 	for i := range probes {
 		background[i] = [2]int32{probes[i].calls[1].Load(), probes[i].calls[2].Load()}
 	}
-	wait(func() bool {
+	wait(10*time.Second, func() bool {
 		for i := range probes {
 			if probes[i].calls[1].Load() <= background[i][0] || probes[i].calls[2].Load() <= background[i][1] {
 				return false
@@ -155,7 +156,7 @@ func Test1000WorkersRecoverFromSharedHLSOutage(t *testing.T) {
 		before[i] = probes[i].calls[0].Load()
 	}
 	close(resume)
-	wait(func() bool {
+	wait(10*time.Second, func() bool {
 		for i := range probes {
 			if probes[i].calls[0].Load() < before[i]+2 {
 				return false
