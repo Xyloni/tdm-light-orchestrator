@@ -13,11 +13,15 @@ import (
 type TelegramDocument struct {
 	Name      string
 	Data      []byte
+	Caption   string
 	AfterSend func() string
 }
 
 func (b *Bot) sendOrchestratorDocument(ctx context.Context, document *TelegramDocument) string {
 	if err := b.sendDocument(ctx, document); err != nil {
+		if document.Caption != "" {
+			return "Telegram не подтвердил отправку архива. Попробуйте ещё раз."
+		}
 		return "Telegram не подтвердил отправку файла. Аккаунты и игра сохранены."
 	}
 	if document.AfterSend != nil {
@@ -25,6 +29,9 @@ func (b *Bot) sendOrchestratorDocument(ctx context.Context, document *TelegramDo
 			return "Файл отправлен. Операция удаления отменена."
 		}
 		return "Файл отправлен. " + document.AfterSend()
+	}
+	if document.Caption != "" {
+		return "Файл отправлен. " + document.Caption
 	}
 	return "Файл отправлен. Храните его приватно: он содержит учётные данные Twitch."
 }
@@ -35,7 +42,11 @@ func (b *Bot) sendDocument(ctx context.Context, document *TelegramDocument) erro
 	if err := form.WriteField("chat_id", strconv.FormatInt(b.adminID, 10)); err != nil {
 		return err
 	}
-	if err := form.WriteField("caption", "Файл содержит учётные данные Twitch. Храните его приватно."); err != nil {
+	caption := document.Caption
+	if caption == "" {
+		caption = "Файл содержит учётные данные Twitch. Храните его приватно."
+	}
+	if err := form.WriteField("caption", caption); err != nil {
 		return err
 	}
 	file, err := form.CreateFormFile("document", document.Name)

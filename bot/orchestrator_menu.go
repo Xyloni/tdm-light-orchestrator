@@ -25,6 +25,7 @@ func (b *Bot) registerOrchestratorMenu(ctx context.Context) {
 		{"command": "status", "description": "Активные кампании и состояние Twitch"},
 		{"command": "lagging", "description": "Отстающие аккаунты и скорость начисления"},
 		{"command": "stats", "description": "Статистика за сегодня, неделю и всё время"},
+		{"command": "download_logs", "description": "Скачать архив дневных логов"},
 		{"command": "games", "description": "Игры, пауза и перезапуск"},
 		{"command": "settings", "description": "Режим группировки и снижение нагрузки"},
 		{"command": "help", "description": "Справка и примеры"},

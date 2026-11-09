@@ -181,7 +181,7 @@ func (s *scheduler) startBotServices(ctx context.Context, runtime *botRuntime, c
 				log.Print("orchestrator: invalid saved Discord owner ID")
 				continue
 			}
-			control = bot.NewDiscord(entry.Token, entry.OwnerID, bot.Actions{Orchestrator: s.command, Upload: s.upload, Interactive: s.discordAction})
+			control = bot.NewDiscord(entry.Token, entry.OwnerID, bot.Actions{Orchestrator: s.command, Upload: s.upload, Interactive: s.discordAction, ExportLogs: s.exportLogs})
 		default:
 			continue
 		}

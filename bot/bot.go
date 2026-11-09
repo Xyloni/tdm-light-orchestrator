@@ -195,6 +195,14 @@ func (b *Bot) handle(ctx context.Context, text string, document *telegramDocumen
 		case "/menu", "/games", "/settings", "/status":
 			b.showOrchestratorMenu(ctx, strings.TrimPrefix(cmd, "/"))
 			return
+		case "/download_logs":
+			date := strings.TrimSpace(text[len(fields[0]):])
+			action := "logs"
+			if date != "" {
+				action = "logs:" + date
+			}
+			b.showOrchestratorMenu(ctx, action)
+			return
 		case "/notifications", "/lagging":
 			if len(fields) == 1 {
 				b.showOrchestratorMenu(ctx, strings.TrimPrefix(cmd, "/"))

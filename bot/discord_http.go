@@ -63,8 +63,18 @@ func (a *discordAPI) request(ctx context.Context, method, path, route string, pa
 	if err != nil {
 		return fmt.Errorf("discord: JSON encoding error")
 	}
+	return a.requestBody(ctx, method, path, route, "application/json", data, result)
+}
+
+func (a *discordAPI) requestBody(ctx context.Context, method, path, route, contentType string, data []byte, result any) error {
+	client := a.client
+	if contentType != "application/json" {
+		noRedirects := *client
+		noRedirects.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = &noRedirects
+	}
 	for attempt := 0; attempt < 4; attempt++ {
-		if err = a.wait(ctx, route); err != nil {
+		if err := a.wait(ctx, route); err != nil {
 			return err
 		}
 		req, e := http.NewRequestWithContext(ctx, method, a.base+path, bytes.NewReader(data))
@@ -72,9 +82,9 @@ func (a *discordAPI) request(ctx context.Context, method, path, route string, pa
 			return fmt.Errorf("discord: invalid request")
 		}
 		req.Header.Set("Authorization", "Bot "+a.token)
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 		req.Header.Set("User-Agent", "TDM-Light (https://github.com/Xyloni/tdm-light-orchestrator)")
-		resp, e := a.client.Do(req)
+		resp, e := client.Do(req)
 		if e != nil {
 			return fmt.Errorf("discord: connection failed")
 		}

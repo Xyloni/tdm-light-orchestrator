@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"sort"
@@ -27,6 +28,24 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 	switch kind {
 	case "help", "help-commands":
 		return telegramHelp(exportValue, kind == "help-commands")
+	case "logs":
+		panel.Title = "📁 Дневные логи"
+		now := time.Now()
+		if exportValue == "" {
+			panel.Text = "Выберите дату по времени сервера. Бот отправит журнал оркестратора и логи майнеров за этот день одним ZIP-архивом."
+		} else {
+			name, data, message := s.exportLogs(context.Background(), exportValue)
+			panel.Text = message
+			if name != "" {
+				panel.Document = &bot.TelegramDocument{Name: name, Data: data, Caption: "Архив дневных логов. Храните его приватно."}
+			}
+		}
+		for days, label := range []string{"📅 Сегодня", "📅 Вчера", "📅 Позавчера"} {
+			date := now.AddDate(0, 0, -days)
+			row(button(label+" · "+date.Format("02.01"), "logs:"+date.Format(logDateLayout)))
+		}
+		row(button("В меню", "menu"))
+		return panel
 	case "export", "export-confirm", "export-clear-confirm", "export-remove-confirm":
 		return s.telegramExport(kind, exportValue)
 	}
@@ -46,6 +65,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		row(button("Статус фарма", "status"), button("Отстающие", "lagging"))
 		row(button("Игры", "games"), button("Аккаунты", "accounts"))
 		row(button("Статистика", "stats"), button("Уведомления", "notifications"))
+		row(button("📁 Скачать логи", "logs"))
 		row(button("Настройки", "settings"), button("Справка", "help"))
 		return panel
 	case "quarantine":

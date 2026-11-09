@@ -19,6 +19,7 @@ import (
 
 type Actions struct {
 	Orchestrator func(string) string
+	ExportLogs   func(context.Context, string) (name string, data []byte, message string)
 	Interactive  func(context.Context, string, map[string]string, []byte) (string, []DiscordChoice)
 	Settings     func(string) (SettingsPanel, bool)
 	Status       func() string
@@ -218,7 +219,9 @@ func (d *Discord) execute(ctx context.Context) {
 			var text string
 			var reload bool
 			var replyErr error
-			if message, choices, handled := d.interactiveOrchestrator(commandCtx, i); handled {
+			if i.Type == 2 && i.Data.Name == "download_logs" && d.actions.ExportLogs != nil {
+				replyErr = d.replyLogArchive(commandCtx, i)
+			} else if message, choices, handled := d.interactiveOrchestrator(commandCtx, i); handled {
 				replyErr = d.replyChoices(commandCtx, i, message, choices)
 			} else if isSettingsInteraction(i) && d.actions.Settings != nil {
 				panel, changed := d.actions.Settings(discordSettingsAction(i))
@@ -352,6 +355,13 @@ func (d *Discord) registeredCommands() []map[string]any {
 		return all
 	}
 	selected := make([]map[string]any, 0, len(orchestratorCommands)+1)
+	if d.actions.ExportLogs != nil {
+		selected = append(selected, map[string]any{
+			"name": "download_logs", "description": "Скачать ZIP с логами за выбранный день",
+			"type": 1, "contexts": []int{1}, "integration_types": []int{0},
+			"options": []map[string]any{{"type": 3, "name": "date", "description": "ГГГГ-ММ-ДД по времени сервера. Пустое поле означает сегодня.", "max_length": 10}},
+		})
+	}
 	for _, spec := range orchestratorCommands {
 		if d.actions.Interactive != nil && spec.name == "remove_game" {
 			continue
