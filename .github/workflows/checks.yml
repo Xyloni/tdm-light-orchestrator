@@ -1,0 +1,31 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+      - run: go test ./...
+      - run: go vet ./...
+      - if: runner.os == 'Linux'
+        run: go test -race ./...
+      - if: runner.os == 'Linux'
+        run: |
+          bash -n deploy/install-vps.sh vps/install.sh vps/update.sh
+          docker compose -f vps/compose.yaml config --quiet
+          docker compose -f vps/compose.orchestrator.yaml config --quiet
+          sudo bash .github/test-vps.sh

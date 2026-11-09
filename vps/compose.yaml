@@ -1,0 +1,17 @@
+services:
+  tdm-light:
+    image: ${TDMLIGHT_IMAGE:-ghcr.io/xyloni/tdm-light-orchestrator:latest}
+    restart: on-failure
+    init: true
+    environment:
+      ACCOUNTS_FILE: /data/account.txt
+      LOG_DIR: /data/logs
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - ./data:/data
+    stop_grace_period: 40s
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"

@@ -1,0 +1,68 @@
+name: Publish VPS image
+
+on:
+  workflow_run:
+    workflows: [Checks]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-vps
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build runtime check image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: tdm-light-check:local
+      - name: Check image runtime
+        run: |
+          docker run --rm --entrypoint /bin/sh tdm-light-check:local -c 'test -x /app/tdm-light && test "$(id -u)" = 10001 && test -r /etc/ssl/certs/ca-certificates.crt'
+      - name: Smoke test the orchestrator
+        run: |
+          container="$(docker run -d --tmpfs /data:uid=10001,gid=10001,mode=0700 tdm-light-check:local --orchestrator)"
+          trap 'docker rm -f "$container" >/dev/null' EXIT
+          for attempt in {1..10}; do
+            if docker exec "$container" wget -q -T 2 -O /dev/null http://127.0.0.1:8787/; then exit 0; fi
+            sleep 1
+          done
+          docker logs "$container"
+          exit 1
+      - name: Publish verified image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/xyloni/tdm-light-orchestrator:latest
+            ghcr.io/xyloni/tdm-light-orchestrator:sha-${{ github.event.workflow_run.head_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/Xyloni/tdm-light-orchestrator
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
+          cache-from: type=gha,scope=tdm-light-image
+          cache-to: type=gha,mode=max,scope=tdm-light-image

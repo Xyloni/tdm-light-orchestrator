@@ -1,0 +1,22 @@
+[Unit]
+Description=tdm light Twitch Drops worker
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=tdm-light
+Group=tdm-light
+WorkingDirectory=/opt/tdm-light
+ExecStart=/opt/tdm-light/tdm-light
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/tdm-light
+
+[Install]
+WantedBy=multi-user.target

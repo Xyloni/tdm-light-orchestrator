@@ -1,0 +1,36 @@
+# Local credentials and account data
+/accounts.txt
+/account.txt
+/config.env
+/config.json
+/.env
+/data/
+/accounts.txt.*.bak
+/account.txt.*.bak
+
+# Runtime data and build products
+/logs/
+/.gocache/
+/dropfarm.exe
+/dropfarm-vps-ubuntu.tar.gz
+/tdm-light.exe
+/tdm-light-vps-ubuntu.tar.gz
+/vps-linux/dropfarm-linux-*
+/vps-linux/tdm-light-linux-*
+/vps-linux/config.env.example
+/vps-linux/config.json.example
+*.log
+*.tmp
+
+# External reference project (not part of tdm light)
+/GrubDrops-2.2.0/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+/orchestrator-data/
+/data-orchestrator/
+/tdm-light-orchestrator.exe

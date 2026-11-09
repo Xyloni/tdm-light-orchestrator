@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TDM Light · Оркестратор</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0a080e; --surface: #15111d; --well: #0e0b15;
+  --ink: #f4eeff; --muted: #bcb1ce; --line: #392a4e;
+  --accent: #d7b7ff; --action: #6a36b3; --focus: #e2baff;
+}
+* { box-sizing: border-box }
+html { scroll-padding-top: 1.25rem }
+body {
+  margin: 0; min-height: 100vh; color: var(--ink);
+  background: radial-gradient(ellipse 60rem 34rem at 50% 0, #27143e, transparent 85%), var(--bg);
+  font: 15px/1.55 system-ui, sans-serif;
+}
+main { max-width: 76rem; margin: auto; padding: 2rem 1rem 4rem }
+h1, h2, h3, p { margin: 0 }
+h1 { font-size: clamp(1.9rem, 5vw, 3.45rem); letter-spacing: -.055em; line-height: 1.08; margin: .45rem 0 .65rem }
+h2 { font-size: 1.25rem; letter-spacing: -.025em; margin-bottom: .8rem }
+h3 { font-size: 1rem }
+.muted, small { color: var(--muted) }
+small { font-size: .83rem }
+.masthead, .row, .game-head, .switch-row { display: flex; gap: 1rem; align-items: center; justify-content: space-between }
+.masthead {
+  padding: clamp(1.3rem, 5vw, 3.3rem); border-radius: 1.25rem; border: 1px solid #624280;
+  background: radial-gradient(ellipse at 85% 0%, #4b2773, transparent 65%), linear-gradient(125deg, #191021, #2a183c);
+  box-shadow: 0 20px 55px #0007;
+}
+.masthead p { color: #d3c2e4 }
+.eyebrow, .section-label { color: var(--accent); font-size: .72rem; font-weight: 800; letter-spacing: .15em; text-transform: uppercase }
+.eyebrow { display: inline-block; border: 1px solid #755391; border-radius: 2rem; padding: .2rem .6rem }
+.section-label { margin-bottom: .25rem }
+nav { display: flex; flex-wrap: wrap; gap: .35rem; margin: 1rem 0; padding: .4rem; border: 1px solid var(--line); border-radius: .75rem; background: #120e19 }
+nav a { color: var(--accent); text-decoration: none; font-weight: 650; border-radius: .45rem; padding: .35rem .75rem }
+nav a:hover { background: #302045 }
+.grid, .stats { display: grid; gap: 1rem; margin-top: 1rem }
+.grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)) }
+.stats { grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)) }
+.card, .game, .notice { background: var(--surface); border: 1px solid var(--line); border-radius: .9rem; padding: clamp(1rem, 2.4vw, 1.45rem) }
+.card { box-shadow: 0 5px 22px #0004 }
+.stat { border-top: 2px solid #a970ec; background: linear-gradient(145deg, #221633, var(--surface)) }
+.stat strong { display: block; color: #f0ddff; font-size: clamp(1.4rem, 3vw, 2rem); font-variant-numeric: tabular-nums }
+.game { background: var(--well) }
+.game + .game { margin-top: .75rem }
+.game-head { margin-bottom: .65rem }
+.game-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0 }
+.tag { font-size: .8rem; border-radius: 1rem; background: #342147; color: #e6ccff; padding: .2rem .55rem; font-weight: 650 }
+form { margin: 0 }
+.stack, .fields { display: grid; gap: .7rem }
+.fields { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)) }
+label.field { display: grid; gap: .25rem; font-weight: 550 }
+input, select, button, .link { font: inherit }
+input:not([type=checkbox]):not([type=hidden]), select {
+  min-width: 0; width: 100%; padding: .52rem .65rem; border: 1px solid #59436e;
+  border-radius: .5rem; background: var(--well); color: var(--ink);
+}
+input::placeholder { color: #aa9abf }
+button, .link, input::file-selector-button {
+  display: inline-block; width: fit-content; padding: .48rem .8rem; border-radius: .5rem; border: 1px solid #9b68db;
+  background: var(--action); color: #fff; text-decoration: none; font-weight: 650; cursor: pointer;
+}
+input::file-selector-button { margin-right: .55rem; padding: .25rem .55rem }
+.secondary, .refresh { color: #e8d5ff; background: #241636 }
+.danger { background: #742b49; border-color: #c37b9b }
+button:hover, .link:hover { filter: brightness(1.18) }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px }
+.switch {
+  appearance: none; width: 2.6rem; height: 1.45rem; border: 1px solid #775d94;
+  border-radius: 1rem; background: #302440; cursor: pointer; position: relative; flex: none;
+}
+.switch::before { content: ""; position: absolute; left: .17rem; top: .16rem; width: 1rem; height: 1rem; border-radius: 50%; background: #b7a4cd }
+.switch:checked { background: #8446ce; border-color: #ba8bf1 }
+.switch:checked::before { left: 1.28rem; background: #fff }
+hr { border: 0; border-top: 1px solid var(--line); margin: 1.15rem 0 }
+.notice { margin-top: 1rem; border-left: 4px solid #ad75f1; white-space: pre-wrap }
+.bot-card, .report, .help { margin-top: 1rem }
+.bot-form { margin-top: 1rem; max-width: 44rem }
+details { margin-top: .75rem }
+summary { cursor: pointer; color: var(--accent); font-weight: 650 }
+pre, .help-copy { margin: .55rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--well); padding: .75rem; border-radius: .5rem }
+.help-copy { color: var(--muted) }
+code { color: #e5c8ff }
+.field-note { margin-bottom: .75rem }
+.mode-link { color: var(--accent); font-size: .83rem }
+.group-summary { margin: .6rem 0; color: var(--ink); border-left: 2px solid #a970ec; padding-left: .65rem }
+@media (max-width: 38rem) {
+  main { padding-top: .8rem }
+  .masthead, .row, .game-head { align-items: flex-start; flex-wrap: wrap }
+}
+</style>
+</head>
+<body><main>
+<header class="masthead"><div><span class="eyebrow">TDM LIGHT / CONTROL</span><h1>Оркестратор TDM Light</h1><p>Кампании Twitch Drops, аккаунты и управление майнерами</p></div><a class="link refresh" href="/">Обновить статус</a></header>
+<nav aria-label="Разделы панели"><a href="#games">Игры</a><a href="#accounts">Аккаунты</a><a href="#settings">Настройки</a><a href="#bots">Бот управления</a><a href="#notifications">Уведомления</a><a href="#help">Справка</a></nav>
+{{if .Message}}<p class="notice" role="status">{{.Message}}</p>{{end}}
+<p class="notice muted">{{.CatalogStatus}}</p>
+<section aria-label="Статистика за всё время" class="stats">
+<div class="card stat"><span class="muted">Аккаунто-минуты</span><strong>{{.Lifetime.Minutes}}</strong></div>
+<div class="card stat"><span class="muted">Готовые награды</span><strong>{{.Lifetime.Rewards}}</strong></div>
+<div class="card stat"><span class="muted">Завершённые кампании</span><strong>{{.Lifetime.Campaigns}}</strong><a class="mode-link" href="#farm-stats">Статистика по периодам</a></div>
+</section>
+<details class="card report" id="farm-stats"><summary>Статистика по периодам</summary><pre>{{.StatsText}}</pre></details>
+<div class="stats">
+<div class="card stat"><span class="muted">Игры в работе</span><strong>{{.ActiveGames}} / {{.Settings.MaxGames}}</strong></div>
+<div class="card stat"><span class="muted">Аккаунты в работе</span><strong>{{.ActiveAccounts}} / {{.Settings.MaxAccounts}}</strong></div>
+<div class="card stat"><span class="muted">Отстают из проверенных</span><strong>{{len .Lagging.Slow}} / {{.Lagging.Measured}}</strong><a class="mode-link" href="#lagging">Подробнее</a></div>
+<div class="card stat"><span class="muted">Свободный пул</span><strong>{{.FreeAccounts}}</strong></div>
+<div class="card stat"><span class="muted">Режим группировки</span><strong>{{if .Settings.SaveResources}}Экономия{{else}}Скорость{{end}}</strong><a class="mode-link" href="#settings">Для следующих групп</a></div>
+</div>
+<div class="grid">
+<section class="card" id="games"><p class="section-label">Кампании</p><h2>Игры</h2><p class="muted field-note">Название должно совпадать с категорией Twitch. Цель задаёт размер пула, до которого оркестратор добирает свободные аккаунты.</p>
+<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{.Token}}">
+<div class="fields"><label class="field">Название игры<input name="game" required maxlength="200" value="{{.SearchQuery}}" placeholder="Например, Hitman"></label><label class="field">Целевой размер пула<input type="number" name="target" min="1" {{if .SearchTarget}}value="{{.SearchTarget}}"{{end}} required></label></div>
+<div class="fields"><button name="action" value="search">Найти в Twitch</button><button class="secondary" name="action" value="add">Добавить точное название</button></div>
+<small>Поиск использует Twitch-аккаунт из пулов. Если найдено несколько категорий, выберите нужную.</small>
+</form>
+{{if .Categories}}<form class="stack" method="post" style="margin-top:1rem">
+<input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="add"><input type="hidden" name="target" value="{{.SearchTarget}}">
+<label class="field">Категория Twitch<select name="game" required>{{range .Categories}}<option>{{.}}</option>{{end}}</select></label>
+<button>Добавить выбранную игру</button>
+</form>{{end}}
+<div style="margin-top:1rem">
+{{range .Games}}
+<article class="game"><div class="game-head"><h3>{{.Name}}</h3><span class="tag">{{if .Removing}}Удаляется{{else if .Regroup}}Перегруппировка{{else if .Paused}}На паузе{{else if .Stopping}}Перезапускается{{else if .Active}}В работе{{else}}Ожидает{{end}}</span></div>
+<p class="muted">В пуле {{.Accounts}} из {{.Target}}{{if .Deficit}} · не хватает {{.Deficit}}{{end}}</p>
+{{if .GroupSummary}}<p class="group-summary">{{.GroupSummary}}</p>{{end}}
+<details><summary>Правила игры · {{.PolicyLabel}}</summary>
+<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="action" value="game-policy"><input type="hidden" name="game" value="{{.Key}}">
+<label class="field">Режим группировки<select name="mode"><option value="">Общий режим</option><option value="speed" {{if eq .Mode "speed"}}selected{{end}}>Скорость</option><option value="resources" {{if eq .Mode "resources"}}selected{{end}}>Экономия ресурсов</option></select></label>
+<label class="field">Запас в минутах · 0 для общего запаса<input name="reserve" type="number" min="0" max="1440" value="{{.ReserveMinutes}}" required></label>
+<button>Сохранить правила игры</button>
+</form></details>
+<details><summary>История кампаний</summary><pre>{{.Report}}</pre></details>
+<details><summary>Карантин игры</summary><pre>{{.Quarantine}}</pre></details>
+{{if not .Removing}}<form class="game-actions" method="post">
+<input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="game" value="{{.Key}}">
+{{if .Paused}}<button name="action" value="resume">Возобновить</button>{{else}}
+<button class="secondary" name="action" value="stop">Остановить игру</button>
+{{if and .Active (not .Stopping)}}<button class="secondary" name="action" value="restart">Перезапустить майнер</button>{{end}}
+{{end}}</form>{{end}}
+<form class="stack" method="post" style="margin-top:.6rem">
+<input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="action" value="target"><input type="hidden" name="game" value="{{.Key}}">
+<div class="fields"><label class="field">Целевой размер пула<input type="number" name="target" min="1" value="{{.Target}}" required></label></div><button class="secondary">Сохранить цель</button>
+</form>
+<details><summary>Пропуски по аккаунтам</summary><pre>{{.Errors}}</pre></details>
+{{if not .Removing}}<details><summary>Исключения наград · {{len .ExcludedRewards}}</summary>
+<form class="stack" method="post" style="margin-top:.65rem">
+<input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="game" value="{{.Key}}">
+<label class="field">Полное название награды<input name="reward" required maxlength="300" placeholder="Например, Royal Purple Banana"></label>
+<small>Название сопоставляется целиком, регистр не важен. Работающий майнер этой игры перезапустится, чтобы применить изменения.</small>
+<button class="secondary" name="action" value="exclude">Исключить награду</button>
+</form>
+{{$game := .Key}}{{if .ExcludedRewards}}<ul>{{range $reward := .ExcludedRewards}}<li>
+<form class="game-actions" method="post">
+<input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="game" value="{{$game}}">
+<input type="hidden" name="reward" value="{{$reward}}">
+<span>{{$reward}}</span><button class="secondary" name="action" value="include">Вернуть в фарм</button>
+</form></li>{{end}}</ul>{{end}}
+</details>{{end}}
+{{if not .Removing}}<details><summary>Удалить игру</summary>
+<form class="stack" method="post" style="margin-top:.65rem">
+<input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="action" value="remove"><input type="hidden" name="game" value="{{.Key}}">
+<label class="field">Что сделать с аккаунтами<select name="disposition" required><option value="">Выберите действие</option><option value="release">Вернуть в свободный пул</option><option value="delete">Удалить записи аккаунтов</option></select></label>
+<label><input type="checkbox" name="confirm" required> Удалить игру и историю её кампаний{{if .Active}} после остановки майнера{{end}}.</label>
+<button class="danger">Подтвердить удаление</button>
+</form></details>{{end}}
+</article>
+{{else}}<p class="muted">Список пока пуст. Добавьте первую игру.</p>{{end}}
+</div>
+</section>
+<section class="card" id="accounts"><p class="section-label">Пулы</p><h2>Аккаунты</h2>
+<details><summary>Карантин аккаунтов</summary><pre>{{.Quarantine}}</pre></details>
+<form class="stack" method="post" enctype="multipart/form-data">
+<input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="upload">
+<label class="field">Пул для загрузки<select name="game"><option value="">Свободный пул</option>{{range .Games}}<option value="{{.Key}}">{{.Name}}</option>{{end}}</select></label>
+<label class="field">Файл аккаунтов<input type="file" name="accounts" accept=".txt,text/plain" required></label>
+<small>Файл .txt до 2 МБ. Одна строка на аккаунт. Повторная загрузка с тем же логином и Twitch ID обновляет данные. Для смены игры используйте форму перемещения.</small>
+<button>Загрузить аккаунты</button>
+</form>
+<hr>
+<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="move">
+<label class="field">Логин аккаунта<input name="login" required pattern="[A-Za-z0-9_]+" maxlength="100"></label>
+<label class="field">Новый пул<select name="game"><option value="">Свободный пул</option>{{range .Games}}<option value="{{.Key}}">{{.Name}}</option>{{end}}</select></label>
+<button class="secondary">Переместить аккаунт</button>
+</form>
+<hr>
+<details><summary>Очистить пул аккаунтов</summary>
+<form class="stack" method="post" style="margin-top:.65rem">
+<input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="clear-pool">
+<label class="field">Пул для очистки<select name="scope" required><option value="">Выберите пул</option><option value="free">Свободный пул · {{.FreeAccounts}}</option>{{range .Games}}{{if not .Removing}}<option value="game:{{.Key}}">{{.Name}} · {{.Accounts}}</option>{{end}}{{end}}</select></label>
+<label class="field">Что сделать с аккаунтами<select name="disposition" required><option value="">Выберите действие</option><option value="release">Вернуть в свободный пул (только для игры)</option><option value="delete">Удалить записи аккаунтов</option></select></label>
+<small>Для свободного пула выберите удаление. Очистка пула игры оставляет её на паузе. Работающий майнер сначала нужно остановить.</small>
+<label><input type="checkbox" name="confirm" required> Подтверждаю очистку выбранного пула</label>
+<button class="danger">Очистить выбранный пул</button>
+</form></details>
+</section>
+<section class="card" id="settings"><p class="section-label">Планировщик</p><h2>Лимиты и расписание</h2><p class="muted field-note">Лимит аккаунтов общий для всех майнеров. Уже начатые группы продолжают работу при изменении лимитов.</p>
+<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="limits">
+<div class="fields"><label class="field">Одновременные игры<input type="number" name="max_games" min="1" value="{{.Settings.MaxGames}}" required></label><label class="field">Общий лимит аккаунтов<input type="number" name="max_accounts" min="1" value="{{.Settings.MaxAccounts}}" required></label></div>
+<button>Сохранить лимиты</button>
+</form>
+<hr>
+<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="mode">
+<label class="switch-row"><span>Экономия ресурсов<br><small>Текущий режим: {{if .Settings.SaveResources}}Экономия ресурсов{{else}}Скорость{{end}}</small></span><input class="switch" type="checkbox" role="switch" name="save_resources" {{if .Settings.SaveResources}}checked{{end}}></label>
+<small>Выключено — больше аккаунтов одновременно. Включено — минимальная группа по прогнозу до дедлайна. Изменение применяется со следующей группы.</small>
+<button>Сохранить режим</button>
+</form>
+{{if .Games}}<details><summary>Предпросмотр расписания</summary>
+<form class="stack" method="post"><input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="preview">
+<label class="field">Игры<select name="scope"><option value="all">Все игры</option>{{range .Games}}{{if not .Removing}}<option value="game:{{.Key}}">{{.Name}}</option>{{end}}{{end}}</select></label>
+<label class="field">Режим (для всех игр — с учётом индивидуальных правил)<select name="mode"><option value="current">Текущий</option><option value="speed">Скорость</option><option value="resources">Экономия ресурсов</option></select></label>
+<button class="secondary">Рассчитать без применения</button></form></details>
+<details><summary>Перегруппировать уже запущенные группы</summary>
+<form class="stack" method="post" style="margin-top:.65rem">
+<input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="regroup">
+<label class="field">Игры для перерасчёта<select name="scope" required><option value="">Выберите игры</option><option value="all">Все игры</option>{{range .Games}}{{if not .Removing}}<option value="game:{{.Key}}">{{.Name}}</option>{{end}}{{end}}</select></label>
+<small>Сначала сохраните режим выше. Майнеры выбранных игр временно остановятся. Незавершённые аккаунты будут распределены заново, а начисленный прогресс сохранится в Twitch.</small>
+<label><input type="checkbox" name="confirm" required> Подтверждаю остановку и перегруппировку</label>
+<button class="danger">Применить к выбранным играм</button>
+</form></details>{{end}}
+<hr>
+<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="timing">
+<div class="fields"><label class="field">Запас, мин<input type="number" name="reserve" min="1" max="1440" value="{{.Settings.ReserveMinutes}}" required></label><label class="field">Стартовая скорость, %<input type="number" name="rate" min="1" max="100" value="{{.Settings.ExpectedRatePercent}}" required></label><label class="field">Интервал поиска, сек<input type="number" name="interval" min="15" max="86400" value="{{.Settings.DiscoverySeconds}}" required></label></div>
+<small>Запас добавляется к прогнозу длительности группы. Стартовая скорость используется, пока нет замеров. Интервал задаёт частоту поиска кампаний.</small><button>Сохранить расписание</button>
+</form>
+</section>
+<section class="card"><p class="section-label">Воркеры</p><h2>Параметры майнера</h2>
+<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="miner">
+<label class="switch-row"><span>Диагностика HTTP<br><small>Подробности сетевых запросов в логах майнера.</small></span><input class="switch" type="checkbox" role="switch" name="diagnostics" {{if .Options.Diagnostics}}checked{{end}}></label>
+<label class="switch-row"><span>Единый лог майнера<br><small>Объединяет сообщения майнера и аккаунтов в один файл.</small></span><input class="switch" type="checkbox" role="switch" name="single_log" {{if .Options.SingleLog}}checked{{end}}></label>
+<label class="switch-row"><span>События Twitch PubSub<br><small>Включает подписку на события дропов для аккаунтов группы.</small></span><input class="switch" type="checkbox" role="switch" name="pubsub" {{if .Options.UsePubSub}}checked{{end}}></label>
+<small>Изменения применяются со следующей группы.</small><button>Сохранить параметры</button>
+</form>
+<hr>
+<h2>Снижение нагрузки</h2>
+<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{.Token}}">
+<p class="muted">Сначала посмотри, сколько аккаунтов нужно снять. После подтверждения остановятся наиболее отстающие. Они останутся в пуле игры и пропустят текущую кампанию.</p>
+<button class="secondary" name="action" value="trim">Рассчитать сокращение</button>
+{{if .ShowConfirm}}<button class="danger" name="action" value="trim-confirm">Подтвердить остановку</button>{{end}}
+</form>
+</section>
+</div>
+<section class="card bot-card" id="bots"><div class="row"><div><p class="section-label">Удалённое управление</p><h2>Бот оркестратора</h2></div><span class="tag">{{if .LegacyBots}}Telegram + Discord{{else if eq .BotPlatform "telegram"}}Telegram настроен{{else if eq .BotPlatform "discord"}}Discord настроен{{else}}Отключён{{end}}</span></div>
+<p class="muted">Один бот для всех игр. Команды доступны владельцу с указанным ID. После сохранения подключение обновляется автоматически.</p>
+{{if .LegacyBots}}<p class="muted">Сейчас используются оба бота из конфигурации запуска. Сохранение выберет одну платформу для общей системы.</p>{{end}}
+<form class="stack bot-form" method="post" autocomplete="off">
+<input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="bot">
+<div class="fields"><label class="field">Платформа<select name="platform"><option value="none" {{if eq .BotPlatform "none"}}selected{{end}}>Отключено</option><option value="telegram" {{if eq .BotPlatform "telegram"}}selected{{end}}>Telegram</option><option value="discord" {{if eq .BotPlatform "discord"}}selected{{end}}>Discord</option></select></label>
+<label class="field">ID владельца<input type="text" name="owner_id" inputmode="numeric" maxlength="20" value="{{.BotOwnerID}}" placeholder="Числовой ID пользователя"></label></div>
+<label class="field">Токен бота<input type="password" name="bot_token" autocomplete="new-password" maxlength="512" placeholder="{{if .BotTokenSaved}}Токен сохранён{{else}}Введите токен выбранной платформы{{end}}"></label>
+<small>Пустое поле сохраняет действующий токен той же платформы. Для отключения выберите «Отключено» и сохраните.</small>
+<button>Сохранить подключение</button>
+</form></section>
+<section class="card bot-card" id="notifications"><p class="section-label">События ботов</p><h2>Уведомления</h2>
+<p class="muted">Общий выключатель сохраняет индивидуальный выбор событий.</p>
+<form class="game-actions" method="post"><input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="digest">
+<label class="field">Суточная сводка · время сервера<input name="at" value="{{.DigestAt}}" placeholder="21:00 или off"></label><button>Сохранить время</button></form>
+<small>За предыдущий календарный день. Для отключения введите off.</small>
+<form class="game-actions" method="post"><input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="notifications"><input type="hidden" name="kind" value="all">
+<button name="enabled" value="{{if .NotificationsMuted}}on{{else}}off{{end}}">{{if .NotificationsMuted}}Включить доставку{{else}}Приостановить все уведомления{{end}}</button></form>
+{{range .Notifications}}<form class="switch-row" method="post"><input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="action" value="notifications"><input type="hidden" name="kind" value="{{.Key}}">
+<span>{{.Label}}</span><button class="secondary" name="enabled" value="{{if .Enabled}}off{{else}}on{{end}}" aria-pressed="{{.Enabled}}">{{if .Enabled}}Включено{{else}}Выключено{{end}}</button></form>{{end}}
+</section>
+<details class="card report"><summary>Подробный статус кампаний</summary><pre>{{.Status}}</pre></details>
+<section class="card report" id="simulate"><p class="section-label">Тестовые данные</p><h2>Симулятор расписания</h2>
+<p class="muted">Расчёт в режиме экономии. Сначала укажите слоты и лимит аккаунтов. Затем для каждой игры через | задайте число аккаунтов, минуты на группу и минуты до дедлайна.</p>
+<form class="stack" method="post"><input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="simulate">
+<label class="field">Сценарий<input name="scenario" value="1 20 | 30 30 90 | 20 45 120" maxlength="200" required></label>
+<button class="secondary">Прогнать тестовый сценарий</button></form></section>
+<details class="card report" id="lagging"><summary>Отстающие аккаунты</summary><pre>{{.LaggingText}}</pre></details>
+<section class="card help" id="help">
+<p class="section-label">Справочник</p><h2>Команды и примеры</h2>
+<p class="muted">В Telegram открой <code>/menu</code>. В Discord выбери отдельную команду, например <code>/pause_game</code> или <code>/notifications</code>. Подробности доступны через <code>/help</code>.</p>
+{{range .HelpTopics}}<details><summary>{{.Title}} · help {{.Key}}</summary><p class="help-copy">{{.Body}}</p></details>{{end}}
+</section>
+</main></body></html>

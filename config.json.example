@@ -1,0 +1,22 @@
+{
+  "target_game": "Hunt: Showdown 1896",
+  "ignored_drop_names": [
+    "Hunt White"
+  ],
+  "client_id": "kd1unb4b3q4t58fwlpcbzcbnm76a8fp",
+  "bot_platform": "",
+  "discord_bot_token": "",
+  "discord_admin_id": "",
+  "telegram_bot_token": "",
+  "telegram_admin_id": 0,
+  "accounts_file": "account.txt",
+  "heartbeat_interval_sec": 60,
+  "campaign_poll_interval_sec": 120,
+  "jitter_sec": 20,
+  "log_dir": "logs",
+  "use_pubsub": false,
+  "single_log": true,
+  "diagnostics": false,
+  "stop_when_idle": false,
+  "idle_check_rounds": 3
+}

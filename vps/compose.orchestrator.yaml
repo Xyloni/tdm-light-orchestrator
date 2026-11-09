@@ -1,0 +1,24 @@
+services:
+  orchestrator:
+    image: ${TDMLIGHT_IMAGE:-ghcr.io/xyloni/tdm-light-orchestrator:latest}
+    command: ["--orchestrator"]
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    environment:
+      ORCHESTRATOR_DIR: /data/orchestrator
+      ORCHESTRATOR_WEB_ADDR: 127.0.0.1:8787
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - ./data:/data
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "2", "-O", "/dev/null", "http://127.0.0.1:8787/"]
+      interval: 3s
+      timeout: 3s
+      retries: 8
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"

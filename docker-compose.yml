@@ -1,0 +1,20 @@
+services:
+  tdm-light:
+    build: .
+    image: tdm-light:local
+    container_name: tdm-light
+    restart: on-failure
+    init: true
+    env_file:
+      - .env
+    environment:
+      ACCOUNTS_FILE: /data/account.txt
+      LOG_DIR: /data/logs
+    volumes:
+      - ./data:/data
+    stop_grace_period: 30s
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"

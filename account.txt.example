@@ -1,0 +1,4 @@
+# Twitch accounts: email:login:password:oauth_token:user_ID:device_ID
+# Add account rows locally. Do not commit real account data to Git.
+# Example group marker:
+# 1:
