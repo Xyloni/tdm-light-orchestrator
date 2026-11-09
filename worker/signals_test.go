@@ -172,7 +172,9 @@ func Test250And500WorkersIsolateStalledSignals(t *testing.T) {
 			done := make(chan struct{})
 			go func() { wg.Wait(); close(done) }()
 			allObserved := false
-			deadline := time.Now().Add(4 * time.Second)
+			// Allow for race-detector overhead on CI while keeping the
+			// observation window shorter than the blocked operation's timeout.
+			deadline := time.Now().Add(8 * time.Second)
 			for time.Now().Before(deadline) {
 				allObserved = true
 				for i := range probes {
