@@ -38,6 +38,7 @@ type Bot struct {
 	menuConfirmations     map[string]bool
 	menuConfirmationUntil time.Time
 	menuMessageID         int64
+	latestChatMessage     atomic.Int64
 	saveMenuMessage       func(int64)
 	settingsFn            func(string) (SettingsPanel, bool)
 	token                 string
@@ -118,6 +119,7 @@ func (b *Bot) poll(ctx context.Context) error {
 			UpdateID int64                     `json:"update_id"`
 			Callback *telegramSettingsCallback `json:"callback_query"`
 			Message  *struct {
+				ID       int64             `json:"message_id"`
 				Text     string            `json:"text"`
 				Document *telegramDocument `json:"document"`
 				Chat     struct {
@@ -149,7 +151,11 @@ func (b *Bot) poll(ctx context.Context) error {
 				switch {
 				case b.orchestratorMenu != nil && strings.HasPrefix(callback.Data, "control:"):
 					if b.settingsRequest(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": callback.ID}) == nil {
-						b.handleOrchestratorButton(ctx, strings.TrimPrefix(callback.Data, "control:"), callback.Message.ID)
+						var menuID int64
+						if callback.Message.Text != "" {
+							menuID = callback.Message.ID
+						}
+						b.handleOrchestratorButton(ctx, strings.TrimPrefix(callback.Data, "control:"), menuID)
 					}
 				case strings.HasPrefix(callback.Data, "settings:"):
 					if b.settingsRequest(ctx, "answerCallbackQuery", map[string]any{"callback_query_id": callback.ID}) == nil {
@@ -166,12 +172,19 @@ func (b *Bot) poll(ctx context.Context) error {
 		if b.orchestratorMenu != nil && (msg.Chat.ID != b.adminID || msg.Chat.Type != "private") {
 			continue
 		}
-		b.handle(ctx, msg.Text, msg.Document)
+		if b.orchestratorMenu != nil {
+			b.observeChatMessage(msg.ID)
+		}
+		b.handleMessage(ctx, msg.Text, msg.Document, msg.ID)
 	}
 	return nil
 }
 
 func (b *Bot) handle(ctx context.Context, text string, document *telegramDocument) {
+	b.handleMessage(ctx, text, document, 0)
+}
+
+func (b *Bot) handleMessage(ctx context.Context, text string, document *telegramDocument, messageID int64) {
 	if document != nil {
 		b.handleAccountsDocument(ctx, document.FileID, document.FileName, document.FileSize)
 		return
@@ -181,38 +194,9 @@ func (b *Bot) handle(ctx context.Context, text string, document *telegramDocumen
 		return
 	}
 	cmd := strings.ToLower(strings.SplitN(fields[0], "@", 2)[0])
-	if b.orchestratorMenu != nil && b.menuInput != "" && time.Now().Before(b.menuInputUntil) && !strings.HasPrefix(cmd, "/") {
-		b.showOrchestratorMenu(ctx, b.menuInput+"\n"+strings.TrimSpace(text))
-		return
-	}
 	if b.orchestratorMenu != nil {
-		b.menuInput = ""
-		switch cmd {
-		case "/start":
-			b.registerOrchestratorMenu(ctx)
-			b.showOrchestratorMenu(ctx, "menu")
-			return
-		case "/menu", "/games", "/settings", "/status":
-			b.showOrchestratorMenu(ctx, strings.TrimPrefix(cmd, "/"))
-			return
-		case "/download_logs":
-			date := strings.TrimSpace(text[len(fields[0]):])
-			action := "logs"
-			if date != "" {
-				action = "logs:" + date
-			}
-			b.showOrchestratorMenu(ctx, action)
-			return
-		case "/notifications", "/lagging", "/stats":
-			if len(fields) == 1 {
-				b.showOrchestratorMenu(ctx, strings.TrimPrefix(cmd, "/"))
-				return
-			}
-		case "/help":
-			topic := strings.TrimSpace(text[len(fields[0]):])
-			b.showOrchestratorMenu(ctx, "help:"+topic)
-			return
-		}
+		b.handleOrchestratorText(ctx, cmd, strings.TrimSpace(text[len(fields[0]):]), strings.TrimSpace(text), messageID)
+		return
 	}
 	if b.orchestratorFn != nil {
 		if spec, ok := findOrchestratorCommand(strings.TrimPrefix(cmd, "/")); ok {
@@ -290,38 +274,49 @@ const helpText = `Справка самостоятельного майнера
 Загрузка: отправьте файл .txt до 2 МБ документом. После проверки файл заменит account.txt и майнер перечитает группы. Награды получаются вручную в Twitch.`
 
 func (b *Bot) handleAccountsDocument(ctx context.Context, fileID, fileName string, fileSize int64) {
+	reply := func(text string) {
+		if b.orchestratorMenu != nil {
+			panel := orchestratorReply(text)
+			if strings.HasPrefix(b.menuInput, "upload:") && time.Now().Before(b.menuInputUntil) {
+				panel.Input = b.menuInput
+			}
+			b.renderOrchestratorPanel(ctx, "accounts", panel, 0, true)
+			return
+		}
+		b.sendContext(ctx, text)
+	}
 	if !strings.EqualFold(path.Ext(fileName), ".txt") || strings.ContainsAny(fileName, `/\\`) {
-		b.sendContext(ctx, "Пришли документ с любым названием и расширением .txt.")
+		reply("Пришли документ с любым названием и расширением .txt.")
 		return
 	}
 	if b.uploadFn == nil {
-		b.sendContext(ctx, "Загрузка account.txt не настроена.")
+		reply("Загрузка account.txt не настроена.")
 		return
 	}
 	if fileSize > maxAccountsUploadBytes {
-		b.sendContext(ctx, "Файл слишком большой (максимум 2 МБ).")
+		reply("Файл слишком большой (максимум 2 МБ).")
 		return
 	}
 	content, err := b.downloadDocument(ctx, fileID)
 	if err != nil {
-		b.sendContext(ctx, "Не удалось скачать файл из Telegram: "+err.Error())
+		reply("Не удалось скачать файл из Telegram: " + err.Error())
 		return
 	}
 	upload := b.uploadFn
 	if ref, ok := strings.CutPrefix(b.menuInput, "upload:"); ok && b.uploadToGame != nil {
 		if !time.Now().Before(b.menuInputUntil) {
-			b.sendContext(ctx, "Срок выбора пула истёк. Откройте игру и выберите загрузку заново.")
+			reply("Срок выбора пула истёк. Откройте игру и выберите загрузку заново.")
 			return
 		}
 		upload = func(data []byte) error { return b.uploadToGame(ref, data) }
 	}
 	if err := upload(content); err != nil {
-		b.sendContext(ctx, "Файл не сохранён: "+err.Error())
+		reply("Файл не сохранён: " + err.Error())
 		return
 	}
-	if b.orchestratorFn != nil {
+	if b.orchestratorFn != nil || b.orchestratorMenu != nil {
 		b.menuInput = ""
-		b.sendContext(ctx, "Аккаунты сохранены.")
+		reply("Аккаунты сохранены.")
 		return
 	}
 	b.sendContext(ctx, "✅ account.txt проверен и сохранён. Перезапускаю фарм с новым списком аккаунтов.")
@@ -409,9 +404,19 @@ func (b *Bot) Send(ctx context.Context, text string) error {
 	if err != nil {
 		return fmt.Errorf("telegram: ошибка соединения")
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("telegram: HTTP %d", resp.StatusCode)
+	}
+	if b.orchestratorMenu != nil {
+		var response struct {
+			Result struct {
+				ID int64 `json:"message_id"`
+			} `json:"result"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&response) == nil {
+			b.observeChatMessage(response.Result.ID)
+		}
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -51,24 +52,61 @@ func confirmationAction(action string) bool {
 
 func (b *Bot) handleOrchestratorButton(ctx context.Context, action string, messageID int64) {
 	if confirmationAction(action) && (!b.menuConfirmations[action] || !time.Now().Before(b.menuConfirmationUntil)) {
-		b.sendContext(ctx, "Подтверждение устарело. Откройте действие заново.")
+		b.renderOrchestratorPanel(ctx, action, orchestratorReply("Подтверждение устарело. Откройте действие заново."), messageID, false)
 		return
 	}
 	b.renderOrchestratorMenu(ctx, action, messageID)
 }
 
-func (b *Bot) showOrchestratorMenu(ctx context.Context, action string) {
-	b.renderOrchestratorMenu(ctx, action, 0)
+func (b *Bot) renderOrchestratorMenu(ctx context.Context, action string, messageID int64) {
+	b.renderOrchestratorPanel(ctx, action, b.orchestratorMenu(action), messageID, false)
 }
 
-func (b *Bot) renderOrchestratorMenu(ctx context.Context, action string, messageID int64) {
-	b.menuConfirmations = make(map[string]bool)
-	panel := b.orchestratorMenu(action)
+func orchestratorReply(text string) SettingsPanel {
+	return SettingsPanel{Title: "💬 Ответ оркестратора", Text: text, Buttons: [][]SettingsButton{{{Label: "В меню", Action: "menu"}}}}
+}
+
+func (b *Bot) handleOrchestratorText(ctx context.Context, cmd, args, text string, messageID int64) {
+	var action string
+	var panel SettingsPanel
+	switch {
+	case !strings.HasPrefix(cmd, "/"):
+		if b.menuInput == "" || strings.HasPrefix(b.menuInput, "upload:") || !time.Now().Before(b.menuInputUntil) {
+			return
+		}
+		action = b.menuInput + "\n" + text
+	case cmd == "/start":
+		b.registerOrchestratorMenu(ctx)
+		action = "menu"
+	case cmd == "/menu" || cmd == "/games" || cmd == "/settings" || cmd == "/status":
+		action = strings.TrimPrefix(cmd, "/")
+	case cmd == "/download_logs":
+		action = "logs:" + args
+	case cmd == "/help":
+		action = "help:" + args
+	case args == "" && (cmd == "/notifications" || cmd == "/lagging" || cmd == "/stats"):
+		action = strings.TrimPrefix(cmd, "/")
+	default:
+		spec, ok := findOrchestratorCommand(strings.TrimPrefix(cmd, "/"))
+		if !ok || b.orchestratorFn == nil {
+			return
+		}
+		panel = orchestratorReply(b.orchestratorFn(spec.input(args)))
+	}
+	if action != "" {
+		panel = b.orchestratorMenu(action)
+	}
+	if b.renderOrchestratorPanel(ctx, action, panel, 0, messageID > 0) && messageID > 0 {
+		b.deleteOrchestratorText(ctx, messageID)
+	}
+}
+
+func (b *Bot) renderOrchestratorPanel(ctx context.Context, action string, panel SettingsPanel, fallbackID int64, moveToBottom bool) bool {
 	if panel.Document != nil {
 		panel.Text = b.sendOrchestratorDocument(ctx, panel.Document)
+		moveToBottom = true
 	}
-	b.menuInput = panel.Input
-	b.menuInputUntil = time.Now().Add(5 * time.Minute)
+	confirmations := make(map[string]bool)
 	keyboard := make([][]map[string]string, 0, len(panel.Buttons))
 	for _, row := range panel.Buttons {
 		buttons := make([]map[string]string, 0, len(row))
@@ -76,8 +114,7 @@ func (b *Bot) renderOrchestratorMenu(ctx context.Context, action string, message
 			data := "control:" + button.Action
 			if len(data) <= 64 {
 				if confirmationAction(button.Action) {
-					b.menuConfirmations[button.Action] = true
-					b.menuConfirmationUntil = time.Now().Add(2 * time.Minute)
+					confirmations[button.Action] = true
 				}
 				buttons = append(buttons, map[string]string{"text": telegramButton(button.Action, button.Label), "callback_data": data})
 			}
@@ -92,13 +129,21 @@ func (b *Bot) renderOrchestratorMenu(ctx context.Context, action string, message
 	}
 	previous := b.menuMessageID
 	if previous == 0 {
-		previous = messageID
+		previous = fallbackID
 	}
-	if previous > 0 {
+	moveToBottom = moveToBottom || b.latestChatMessage.Load() > previous
+	remember := func(id int64) {
+		b.menuConfirmations = confirmations
+		b.menuConfirmationUntil = time.Now().Add(2 * time.Minute)
+		b.menuInput = panel.Input
+		b.menuInputUntil = time.Now().Add(5 * time.Minute)
+		b.rememberMenuMessage(id)
+	}
+	if previous > 0 && !moveToBottom {
 		payload["message_id"] = previous
-		if b.settingsRequest(ctx, "editMessageText", payload) == nil {
-			b.rememberMenuMessage(previous)
-			return
+		if err := b.settingsRequest(ctx, "editMessageText", payload); err == nil || errors.Is(err, errTelegramMessageUnchanged) {
+			remember(previous)
+			return true
 		}
 		delete(payload, "message_id")
 	}
@@ -107,22 +152,38 @@ func (b *Bot) renderOrchestratorMenu(ctx context.Context, action string, message
 	}
 	if err := b.settingsRequestResult(ctx, "sendMessage", payload, &sent); err != nil || sent.ID <= 0 {
 		log.Println("[bot] не удалось отправить панель оркестратора")
-		return
+		return false
 	}
-	b.rememberMenuMessage(sent.ID)
+	remember(sent.ID)
 	if previous > 0 && previous != sent.ID {
-		if err := b.settingsRequest(ctx, "deleteMessage", map[string]any{"chat_id": b.adminID, "message_id": previous}); err != nil {
-			log.Println("[bot] Telegram не удалил предыдущее меню")
-		}
+		b.deleteOrchestratorText(ctx, previous)
+	}
+	return true
+}
+
+func (b *Bot) deleteOrchestratorText(parent context.Context, messageID int64) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	if err := b.settingsRequest(ctx, "deleteMessage", map[string]any{"chat_id": b.adminID, "message_id": messageID}); err != nil && parent.Err() == nil {
+		log.Println("[bot] Telegram не удалил служебное сообщение")
 	}
 }
 
 func (b *Bot) rememberMenuMessage(id int64) {
+	b.observeChatMessage(id)
 	if b.menuMessageID == id {
 		return
 	}
 	b.menuMessageID = id
 	if b.saveMenuMessage != nil {
 		b.saveMenuMessage(id)
+	}
+}
+
+func (b *Bot) observeChatMessage(id int64) {
+	for previous := b.latestChatMessage.Load(); id > previous; previous = b.latestChatMessage.Load() {
+		if b.latestChatMessage.CompareAndSwap(previous, id) {
+			return
+		}
 	}
 }

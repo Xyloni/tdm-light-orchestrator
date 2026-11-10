@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 )
+
+var errTelegramMessageUnchanged = errors.New("telegram: сообщение уже актуально")
 
 type SettingsButton struct {
 	Label  string
@@ -29,7 +32,8 @@ type telegramSettingsCallback struct {
 		ID int64 `json:"id"`
 	} `json:"from"`
 	Message struct {
-		ID   int64 `json:"message_id"`
+		ID   int64  `json:"message_id"`
+		Text string `json:"text"`
 		Chat struct {
 			ID   int64  `json:"id"`
 			Type string `json:"type"`
@@ -59,10 +63,17 @@ func (b *Bot) settingsRequestResult(ctx context.Context, method string, payload 
 	}
 	defer resp.Body.Close()
 	var result struct {
-		OK     bool            `json:"ok"`
-		Result json.RawMessage `json:"result"`
+		OK          bool            `json:"ok"`
+		Result      json.RawMessage `json:"result"`
+		Description string          `json:"description"`
 	}
-	if err = json.NewDecoder(resp.Body).Decode(&result); err != nil || resp.StatusCode != 200 || !result.OK {
+	if err = json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("telegram: запрос отклонён")
+	}
+	if method == "editMessageText" && resp.StatusCode == http.StatusBadRequest && strings.HasPrefix(result.Description, "Bad Request: message is not modified") {
+		return errTelegramMessageUnchanged
+	}
+	if resp.StatusCode != http.StatusOK || !result.OK {
 		return fmt.Errorf("telegram: запрос отклонён")
 	}
 	if output != nil {
