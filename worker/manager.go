@@ -99,16 +99,17 @@ func (s *AccountState) tailLogs(n int) []string {
 // Manager управляет группами аккаунтов: фарм идёт поочерёдно группами,
 // внутри группы каждый аккаунт — отдельная горутина.
 type Manager struct {
-	cfg           *config.Config
-	groups        [][]*parser.Account
-	states        map[string]*AccountState // ключ — login (логины должны быть уникальны)
-	http          *http.Client
-	bot           *bot.Service
-	reloadCh      chan struct{}
-	accountGroup  map[string]int
-	rewardMu      sync.Mutex
-	rewardBatches map[rewardBatchKey]*rewardBatch
-	rewardWake    chan struct{}
+	cfg             *config.Config
+	campaignStreams []twitch.Stream
+	groups          [][]*parser.Account
+	states          map[string]*AccountState // ключ — login (логины должны быть уникальны)
+	http            *http.Client
+	bot             *bot.Service
+	reloadCh        chan struct{}
+	accountGroup    map[string]int
+	rewardMu        sync.Mutex
+	rewardBatches   map[rewardBatchKey]*rewardBatch
+	rewardWake      chan struct{}
 
 	recoverySlots  chan struct{}
 	hlsRetries     hlsRetryGate

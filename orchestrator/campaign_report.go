@@ -19,7 +19,10 @@ func (s *scheduler) campaignReport(g *gameState) string {
 		return "Завершённых кампаний пока нет."
 	}
 	var out strings.Builder
-	for _, c := range items {
+	for i, c := range items {
+		if i > 0 {
+			out.WriteByte('\n')
+		}
 		counts := make(map[string]int)
 		for _, result := range c.Results {
 			counts[result]++
@@ -29,7 +32,7 @@ func (s *scheduler) campaignReport(g *gameState) string {
 			status = "срок истёк"
 		}
 		fmt.Fprintf(&out, "%s · %s · до %s\n", c.Name, status, c.Ends.Local().Format("02.01 15:04 MST"))
-		fmt.Fprintf(&out, "Готово: %d · ошибка авторизации: %d · сняты вручную: %d · остановлены по сроку: %d\n", counts["idle"], counts["error: auth"], counts["trimmed"], counts["stopped"])
+		fmt.Fprintf(&out, "Готово: %d · ошибки входа: %d\nСняты вручную: %d · остановлены по сроку: %d\n", counts["idle"], counts["error: auth"], counts["trimmed"], counts["stopped"])
 		if c.CompletedGroups > 0 {
 			fmt.Fprintf(&out, "Групп с результатом: %d · суммарно прогноз %s, факт %s, разница %s\n", c.CompletedGroups, c.PlannedGroupTime.Round(time.Minute), c.ActualGroupTime.Round(time.Minute), (c.ActualGroupTime - c.PlannedGroupTime).Round(time.Minute))
 		} else {

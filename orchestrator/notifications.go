@@ -17,6 +17,7 @@ var noticeKinds = []noticeKind{
 	{"capacity", "Превышение лимита аккаунтов", true},
 	{"campaign_done", "Итог кампании", true},
 	{"campaign_new", "Новая кампания", false},
+	{"airtime", "Эфиры кампании: ожидание, сбой и появление", true},
 	{"group_start", "Запуск группы", false},
 	{"group_done", "Завершение группы", false},
 	{"stalled", "Минуты не начисляются у большинства группы", false},

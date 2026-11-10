@@ -162,3 +162,31 @@ func (s *scheduler) statsText(filter string, now time.Time) string {
 	}
 	return text
 }
+
+// telegramStats is called with the scheduler locked.
+func (s *scheduler) telegramStats(game string, now time.Time) string {
+	stats := &s.state.Stats
+	local := now.Local()
+	var out strings.Builder
+	for _, period := range []struct{ label, from string }{
+		{"📅 Сегодня", local.Format(statsDayLayout)},
+		{"🗓 Последние 7 дней", local.AddDate(0, 0, -6).Format(statsDayLayout)},
+		{"🏁 За всё время", ""},
+	} {
+		if out.Len() > 0 {
+			out.WriteString("\n\n")
+		}
+		out.WriteString(period.label)
+		t := stats.sum(game, period.from)
+		if t == (totals{}) {
+			out.WriteString("\nПока нет результатов.")
+			continue
+		}
+		fmt.Fprintf(&out, "\n⏱ %d мин Twitch · 🎁 %d наград готово\n🏆 %d кампаний завершено · 👥 %d групп", t.Minutes, t.Rewards, t.Campaigns, t.Groups)
+	}
+	out.WriteString("\n\nℹ️ Минуты суммируются по аккаунтам.")
+	if !stats.StartedAt.IsZero() {
+		fmt.Fprintf(&out, "\nУчёт минут и наград с %s.", stats.StartedAt.Local().Format("02.01.2006 15:04 MST"))
+	}
+	return out.String()
+}

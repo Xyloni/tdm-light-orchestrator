@@ -327,6 +327,7 @@ func (s *scheduler) removeGame(key string) bool {
 		return false
 	}
 	delete(s.retry, key)
+	delete(s.airtimes, key)
 	return true
 }
 

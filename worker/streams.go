@@ -172,9 +172,13 @@ func (w *accountWorker) openStreamExcept(ctx context.Context, rnd *rand.Rand, ex
 			return twitch.Stream{}, "", ctx.Err()
 		}
 	}
-	streams, err := w.gql.TopStreams(ctx, w.m.cfg.TargetGame, 15)
-	if err != nil {
-		return twitch.Stream{}, "", err
+	streams := w.m.campaignStreams
+	if streams == nil {
+		var err error
+		streams, err = w.gql.TopStreams(ctx, w.m.cfg.TargetGame, 15)
+		if err != nil {
+			return twitch.Stream{}, "", err
+		}
 	}
 	attempts := 0
 	var earliest time.Time

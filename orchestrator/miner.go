@@ -12,6 +12,7 @@ import (
 
 	"github.com/xyloni/tdm-light-orchestrator/config"
 	"github.com/xyloni/tdm-light-orchestrator/parser"
+	"github.com/xyloni/tdm-light-orchestrator/twitch"
 	"github.com/xyloni/tdm-light-orchestrator/worker"
 )
 
@@ -20,6 +21,7 @@ type minerCommand struct {
 	Accounts []*parser.Account
 	Remove   []string
 	Deadline time.Time
+	Streams  []twitch.Stream
 }
 
 type minerEvent struct {
@@ -155,6 +157,7 @@ func runMinerGroup(ctx context.Context, enc *json.Encoder, commands <-chan miner
 		defer func() { log.SetOutput(previous); combined.Close() }()
 	}
 	manager := worker.NewManager(cfg, [][]*parser.Account{command.Accounts}, nil)
+	manager.SetCampaignStreams(command.Streams)
 	removed := make(chan []string, 1)
 	done := make(chan struct{})
 	go func() { defer close(done); manager.RunManagedGroup(groupCtx, command.Accounts, removed) }()

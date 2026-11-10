@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/xyloni/tdm-light-orchestrator/parser"
+	"github.com/xyloni/tdm-light-orchestrator/twitch"
 	"github.com/xyloni/tdm-light-orchestrator/worker"
 )
 
@@ -21,6 +22,7 @@ func TestGamePolicyQueueAndQuarantine(t *testing.T) {
 		t.Fatal("per-game override did not preserve global defaults")
 	}
 	s.state.Settings.MaxGames = 1
+	s.airtimes = map[string]*campaignAirtime{"example": {campaignID: c.ID, at: now, streams: []twitch.Stream{{Login: "eligible"}}}}
 	s.active["other"] = &activeGame{}
 	if status := s.queueSummary("example", g, now); !strings.Contains(status, "свободный слот") || !strings.Contains(status, "Риск дедлайна") {
 		t.Fatalf("missing wait reason or risk: %s", status)

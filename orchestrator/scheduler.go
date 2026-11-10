@@ -19,6 +19,7 @@ import (
 )
 
 type activeGame struct {
+	streams         []twitch.Stream
 	authNotified    map[string]bool
 	stallNotified   bool
 	logDir          string
@@ -33,6 +34,8 @@ type activeGame struct {
 }
 
 type scheduler struct {
+	airtimes       map[string]*campaignAirtime
+	airtimeChecks  int
 	statsDirty     bool
 	telegramSearch telegramSearchResult
 	journal        *log.Logger
@@ -360,7 +363,8 @@ func (s *scheduler) launchGroup(key string, g *gameState, c *campaign, a *active
 	options := s.minerOptions()
 	cfg.Diagnostics, cfg.SingleLog, cfg.UsePubSub = options.Diagnostics, options.SingleLog, options.UsePubSub
 	cfg.TelegramBotToken, cfg.DiscordBotToken = "", ""
-	a.process.commands <- minerCommand{Config: &cfg, Accounts: accounts, Deadline: c.Ends}
+	a.streams = s.airtimes[key].streams
+	a.process.commands <- minerCommand{Config: &cfg, Accounts: accounts, Deadline: c.Ends, Streams: a.streams}
 	a.groupStarted = now
 	a.plannedDuration = duration
 	a.authNotified = nil
@@ -416,6 +420,12 @@ func (s *scheduler) tick(ctx context.Context, now time.Time) {
 			g.Current = next.ID
 			c = next
 		}
+		air := s.checkCampaignAirtime(ctx, key, g, c, now)
+		if len(air.streams) == 0 || (!a.groupStarted.IsZero() && !air.includes(a.streams)) {
+			a.stopping = true
+			a.process.stop()
+			continue
+		}
 		s.launchGroup(key, g, c, a, now)
 	}
 	type candidate struct {
@@ -448,7 +458,10 @@ func (s *scheduler) tick(ctx context.Context, now time.Time) {
 		if assignPool(s.state, item.key) {
 			s.persist()
 		}
-		if len(s.active) >= s.state.Settings.MaxGames || len(pending(s.state, item.key, c)) == 0 {
+		if len(pending(s.state, item.key, c)) == 0 {
+			continue
+		}
+		if len(s.checkCampaignAirtime(ctx, item.key, g, c, now).streams) == 0 || len(s.active) >= s.state.Settings.MaxGames {
 			continue
 		}
 		p, err := startMiner(ctx, item.key, s.updates)

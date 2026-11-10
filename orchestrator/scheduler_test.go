@@ -8,6 +8,7 @@ import (
 
 	"github.com/xyloni/tdm-light-orchestrator/config"
 	"github.com/xyloni/tdm-light-orchestrator/parser"
+	"github.com/xyloni/tdm-light-orchestrator/twitch"
 	"github.com/xyloni/tdm-light-orchestrator/worker"
 )
 
@@ -64,6 +65,7 @@ func TestSeriesUsesSameProcessThenReleasesDuringPause(t *testing.T) {
 	game := &gameState{Name: "Game", Target: 1, Current: one.ID, Campaigns: map[string]*campaign{one.ID: one, two.ID: two, three.ID: three}}
 	s.state.Games["game"] = game
 	s.state.Accounts = []account{{Credentials: parser.Account{Login: "player"}, Game: "game"}}
+	s.airtimes = map[string]*campaignAirtime{"game": {campaignID: two.ID, at: now, next: now.Add(time.Minute), streams: []twitch.Stream{{Login: "eligible"}}}}
 	stopped := false
 	process := &minerProcess{commands: make(chan minerCommand, 4), stop: func() { stopped = true }}
 	s.active["game"] = &activeGame{process: process}
@@ -72,7 +74,7 @@ func TestSeriesUsesSameProcessThenReleasesDuringPause(t *testing.T) {
 		t.Fatal("active continuation should keep the miner")
 	}
 	group := <-process.commands
-	if group.Config.CampaignID != two.ID {
+	if group.Config.CampaignID != two.ID || len(group.Streams) != 1 || group.Streams[0].Login != "eligible" {
 		t.Fatalf("group targeted %s", group.Config.CampaignID)
 	}
 	s.update(processUpdate{game: "game", process: process, event: minerEvent{Done: true, Progress: []worker.ManagedProgress{{Login: "player", Status: "idle"}}}}, now)

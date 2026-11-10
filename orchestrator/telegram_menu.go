@@ -140,7 +140,10 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 			}
 		}
 	case "stats":
-		panel.Text = s.command("stats")
+		s.mu.Lock()
+		panel.Text = s.telegramStats("", time.Now())
+		s.mu.Unlock()
+		row(button("Обновить", "stats"), button("Статус фарма", "status"))
 	case "lagging":
 		panel.Text = s.command("lagging")
 		row(button("Обновить", "lagging"), button("Статус фарма", "status"))
@@ -241,7 +244,10 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 				case "stop", "resume", "restart":
 					panel.Text += "\n" + s.controlGame(kind, key)
 				case "report":
-					panel.Text += "\n" + s.campaignReport(g)
+					panel.Title = "📋 История кампаний · " + g.Name
+					panel.Text = s.campaignReport(g)
+					row(button("Статистика", "game-stats:"+value), button("К игре", "game:"+value))
+					return panel
 				case "game-preview", "game-preview-speed", "game-preview-resources":
 					mode := "current"
 					if kind != "game-preview" {
@@ -252,8 +258,13 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 				case "game-lagging":
 					panel.Title = "🐢 Отстающие · " + g.Name
 					panel.Text = s.laggingReport(key, time.Now()).text()
+					row(button("Обновить", action), button("К игре", "game:"+value))
+					return panel
 				case "game-stats":
-					panel.Text = s.statsText(g.Name, time.Now())
+					panel.Title = "📊 Статистика · " + g.Name
+					panel.Text = s.telegramStats(key, time.Now())
+					row(button("Обновить", action), button("К игре", "game:"+value))
+					return panel
 				case "game-quarantine":
 					panel.Text += "\n" + s.quarantineSummary(key)
 				case "clear-game", "remove":

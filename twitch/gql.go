@@ -22,6 +22,9 @@ import (
 
 const gqlURL = "https://gql.twitch.tv/gql"
 
+var ErrNoDropsStreams = errors.New("в категории нет эфиров с Drops")
+var ErrStreamOffline = errors.New("канал не в эфире")
+
 // These Android app credentials match the OAuth tokens imported from
 // TwitchDropsMiner/GrubDrops account.txt. Using the web Client-ID with
 // Android-issued tokens causes Twitch's GQL integrity check to reject calls.
@@ -335,7 +338,7 @@ func (c *GQLClient) StreamMetadata(ctx context.Context, login string) (Stream, e
 		return Stream{}, err
 	}
 	if data.User == nil || data.User.Stream == nil {
-		return Stream{}, fmt.Errorf("channel %s is no longer live", login)
+		return Stream{}, fmt.Errorf("%w: %s", ErrStreamOffline, login)
 	}
 	result := Stream{Login: data.User.Login, ChannelID: data.User.ID, BroadcastID: data.User.Stream.ID}
 	game := data.User.Stream.Game
@@ -425,7 +428,7 @@ func (c *GQLClient) TopStreams(ctx context.Context, gameName string, _ int) ([]S
 		})
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("Drops-каталог Twitch вернул 0 подходящих каналов для категории %q (slug %q, записей %d)", gameName, slugData.Game.Slug, len(data.Game.Streams.Edges))
+		return nil, fmt.Errorf("%w: %q (slug %q, записей %d)", ErrNoDropsStreams, gameName, slugData.Game.Slug, len(data.Game.Streams.Edges))
 	}
 	return out, nil
 }

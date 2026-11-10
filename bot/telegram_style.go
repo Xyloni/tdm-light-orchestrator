@@ -86,7 +86,12 @@ func formatTelegramPanel(action, title, text string) string {
 			out.WriteString("<b>Пример:</b> <code>" + html.EscapeString(strings.TrimPrefix(line, "Пример: ")) + "</code>")
 		case strings.HasPrefix(line, "Сейчас: "):
 			out.WriteString("<b>Сейчас:</b>" + strings.TrimPrefix(escaped, "Сейчас:"))
-		case i == 0 && (kind == "stats" || kind == "game-stats" || kind == "game" || kind == "report"):
+		case (kind == "stats" || kind == "game-stats") && (line == "📅 Сегодня" || line == "🗓 Последние 7 дней" || line == "🏁 За всё время"):
+			out.WriteString("<b>" + escaped + "</b>")
+		case kind == "report" && strings.Contains(line, " · до "):
+			name, details, _ := strings.Cut(line, " · ")
+			out.WriteString("<b>" + html.EscapeString(name) + "</b>\n" + html.EscapeString(details))
+		case i == 0 && kind == "game":
 			out.WriteString("<b>" + escaped + "</b>")
 		case strings.HasPrefix(line, "Сегодня:") || strings.HasPrefix(line, "За 7 календарных дней:") || strings.HasPrefix(line, "За всё время:"):
 			label, rest, _ := strings.Cut(line, ":")
@@ -112,7 +117,7 @@ func telegramStatusHeading(line string) bool {
 }
 
 func telegramButton(action, label string) string {
-	if action == "status" && label == "Обновить" {
+	if label == "Обновить" {
 		return "🔄 " + label
 	}
 	kind, value, _ := strings.Cut(action, ":")

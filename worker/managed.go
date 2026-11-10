@@ -6,7 +6,13 @@ import (
 	"time"
 
 	"github.com/xyloni/tdm-light-orchestrator/parser"
+	"github.com/xyloni/tdm-light-orchestrator/twitch"
 )
+
+// SetCampaignStreams must be called before starting managed account workers.
+func (m *Manager) SetCampaignStreams(streams []twitch.Stream) {
+	m.campaignStreams = streams
+}
 
 type ManagedRewardProgress struct {
 	Name           string

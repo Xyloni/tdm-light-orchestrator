@@ -203,7 +203,7 @@ func (b *Bot) handle(ctx context.Context, text string, document *telegramDocumen
 			}
 			b.showOrchestratorMenu(ctx, action)
 			return
-		case "/notifications", "/lagging":
+		case "/notifications", "/lagging", "/stats":
 			if len(fields) == 1 {
 				b.showOrchestratorMenu(ctx, strings.TrimPrefix(cmd, "/"))
 				return

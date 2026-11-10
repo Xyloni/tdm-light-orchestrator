@@ -74,7 +74,15 @@ func (s *scheduler) queueSummary(key string, g *gameState, now time.Time) string
 		return "Ожидание: Twitch пока не показывает активную кампанию для игры."
 	}
 	if a != nil && !a.groupStarted.IsZero() {
-		return s.groupSummary(key, c, now)
+		message := s.groupSummary(key, c, now) + " " + s.airtimeFor(key, c.ID).summary()
+		for _, progress := range a.progress {
+			for _, reward := range progress.RewardProgress {
+				if reward.Known && reward.Minutes > 0 {
+					return message
+				}
+			}
+		}
+		return message + " Twitch пока не подтвердил минуты группы."
 	}
 	count := len(pending(s.state, key, c))
 	usable, free := 0, 0
@@ -93,8 +101,11 @@ func (s *scheduler) queueSummary(key string, g *gameState, now time.Time) string
 	if count == 0 {
 		return "Ожидание: нет доступных аккаунтов. Проверьте пул и карантин."
 	}
+	air := s.airtimeFor(key, c.ID)
 	message := "Готова к запуску."
-	if now.Before(s.retry[key]) {
+	if air == nil || len(air.streams) == 0 {
+		message = air.summary()
+	} else if now.Before(s.retry[key]) {
 		message = "Ожидание: повтор запуска майнера."
 	} else if a == nil && len(s.active) >= s.state.Settings.MaxGames {
 		message = "Ожидание: свободный слот игры."
