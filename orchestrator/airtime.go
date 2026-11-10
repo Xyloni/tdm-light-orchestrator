@@ -23,6 +23,7 @@ type campaignAirtime struct {
 	failed         bool
 	failures       int
 	reason         string
+	waitStatus     string
 }
 
 func (a *campaignAirtime) sameStreams(previous []twitch.Stream) bool {
@@ -52,6 +53,8 @@ func (a *campaignAirtime) status() string {
 		return fmt.Sprintf("Подтверждённых эфиров кампании: %d.", len(a.streams))
 	case a.failed:
 		return "Не удалось проверить доступность эфиров кампании. " + a.reason + "."
+	case a.waitStatus != "":
+		return "Ожидание эфира кампании. " + a.waitStatus
 	case a.total > 0:
 		return fmt.Sprintf("Ожидание эфира кампании. Подходящих среди проверенных каналов: 0 из %d (в списке %d).", a.checked, a.total)
 	default:
@@ -114,7 +117,7 @@ func (s *scheduler) checkCampaignAirtime(ctx context.Context, key string, g *gam
 		defer cancel()
 		client := &http.Client{Timeout: airtimeTimeout}
 		defer client.CloseIdleConnections()
-		streams, checked, total, err := twitch.NewGQLClient(client, &cfg, &credentials).CampaignStreams(checkCtx, game, campaignID, offset)
+		streams, checked, total, waitStatus, err := twitch.NewGQLClient(client, &cfg, &credentials).CampaignStreams(checkCtx, game, campaignID, offset)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.airtimeChecks--
@@ -122,6 +125,7 @@ func (s *scheduler) checkCampaignAirtime(ctx context.Context, key string, g *gam
 			return
 		}
 		previous := air.status()
+		previousWaitStatus := air.waitStatus
 		wasReady, wasFailed, wasChecked := len(air.streams) > 0, air.failed, !air.at.IsZero()
 		air.at = time.Now()
 		air.next = air.at.Add(time.Duration(s.state.Settings.DiscoverySeconds) * time.Second)
@@ -131,6 +135,7 @@ func (s *scheduler) checkCampaignAirtime(ctx context.Context, key string, g *gam
 			air.reason = err.Error()
 		}
 		air.streams, air.checked, air.total = streams, checked, total
+		air.waitStatus = waitStatus
 		if len(streams) == 0 && err != nil {
 			air.failures++
 		} else {
@@ -142,7 +147,8 @@ func (s *scheduler) checkCampaignAirtime(ctx context.Context, key string, g *gam
 		ready := len(streams) > 0
 		active := s.active[key]
 		stoppingAfterFailures := air.failures == 2 && active != nil && !active.groupStarted.IsZero() && !active.stopping
-		if !wasChecked || wasReady != ready || (!ready && wasFailed != air.failed) || stoppingAfterFailures {
+		if !wasChecked || wasReady != ready || (!ready && wasFailed != air.failed) ||
+			(!ready && !air.failed && waitStatus != "" && previousWaitStatus == "") || stoppingAfterFailures {
 			message := air.status()
 			s.event("campaign_airtime game=%q campaign=%q previous=%q status=%q", game, campaignName, previous, message)
 			if !g.Paused && !g.Removing {

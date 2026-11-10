@@ -10,21 +10,29 @@ import (
 
 // CampaignStreams checks this campaign's presence on each candidate channel.
 // offset rotates through large creator allowlists between polls.
-func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string, offset int) (streams []Stream, checked, total int, err error) {
-	var details struct {
-		User *struct {
-			DropCampaign *struct {
-				Allow *struct {
-					IsEnabled *bool
-					Channels  []struct{ Name string }
-				}
+func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string, offset int) (streams []Stream, checked, total int, status string, err error) {
+	type campaignUser struct {
+		DropCampaign *struct {
+			Allow *struct {
+				IsEnabled *bool
+				Channels  []struct{ Name string }
 			}
 		}
+	}
+	var details struct {
+		User *campaignUser
 	}
 	detailsErr := c.campaignQuery(ctx, "DropCampaignDetails", "039277bf98f3130929262cc7c6efd9c141ca3749cb6dca442fc8ead9a53f77c1",
 		map[string]any{"channelLogin": c.Account.Login, "dropID": campaignID}, &details)
 	if detailsErr != nil || details.User == nil || details.User.DropCampaign == nil {
-		detailsErr = errors.New("Twitch не подтвердил список каналов кампании")
+		const query = `query OrchestratorCampaignChannels($id: ID!) {
+			user: currentUser { dropCampaign(id: $id) { allow { isEnabled channels { name } } } }
+		}`
+		details.User = nil
+		detailsErr = c.do(ctx, "OrchestratorCampaignChannels", query, map[string]any{"id": campaignID}, &details)
+		if detailsErr != nil || details.User == nil || details.User.DropCampaign == nil {
+			detailsErr = errors.New("Twitch не подтвердил список каналов кампании")
+		}
 	}
 	var allowlist []string
 	if detailsErr == nil {
@@ -54,6 +62,7 @@ func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string
 	}
 	if len(allowlist) > 0 {
 		total = len(allowlist)
+		offline := 0
 		for i := 0; i < min(total, 30); i++ {
 			login := allowlist[(offset+i)%total]
 			stream, lookupErr := c.StreamMetadata(ctx, login)
@@ -64,9 +73,20 @@ func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string
 				break
 			}
 			checked++
+			if errors.Is(lookupErr, ErrStreamOffline) {
+				offline++
+			}
 			if lookupErr == nil {
 				check(stream)
 			}
+		}
+		switch {
+		case total == 1 && offline == 1:
+			status = fmt.Sprintf("В списке кампании один канал — %s. Сейчас он офлайн.", allowlist[0])
+		case total == checked && offline == total:
+			status = fmt.Sprintf("Все %d каналов из списка кампании сейчас офлайн.", total)
+		case len(streams) == 0 && err == nil && ctx.Err() == nil:
+			status = fmt.Sprintf("В списке кампании %d каналов. Проверено %d, офлайн %d. Подходящий эфир пока не подтверждён.", total, checked, offline)
 		}
 	}
 	if len(allowlist) == 0 || (len(streams) == 0 && err != nil && ctx.Err() == nil) {

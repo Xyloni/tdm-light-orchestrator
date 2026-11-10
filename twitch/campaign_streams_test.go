@@ -16,6 +16,7 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 	wantCampaign := "target"
 	offeredCampaign := "other"
 	detailsUnavailable := false
+	rawSingleOffline := false
 	transport := reviewTransport(func(r *http.Request) (*http.Response, error) {
 		var request struct {
 			OperationName string
@@ -30,6 +31,11 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 			data = `{"user":{"dropCampaign":{"allow":{"isEnabled":true,"channels":[{"name":"live"},{"name":"offline"}]}}}}`
 			if detailsUnavailable {
 				data = `{"user":{"dropCampaign":null}}`
+			}
+		case "OrchestratorCampaignChannels":
+			data = `{"user":{"dropCampaign":null}}`
+			if rawSingleOffline {
+				data = `{"user":{"dropCampaign":{"allow":{"isEnabled":true,"channels":[{"name":"offline"}]}}}}`
 			}
 		case "GameSlug":
 			data = `{"game":{"slug":"game"}}`
@@ -52,23 +58,28 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":` + data + `}`))}, nil
 	})
 	client := NewGQLClient(&http.Client{Transport: transport}, config.Default(), &parser.Account{Login: "fixture"})
-	streams, checked, total, err := client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
+	streams, checked, total, _, err := client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
 	if err != nil || len(streams) != 0 || checked != 2 || total != 2 {
 		t.Fatalf("expected no eligible streams among two channels: %v %d/%d %v", streams, checked, total, err)
 	}
 	offeredCampaign = wantCampaign
-	streams, _, _, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
+	streams, _, _, _, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
 	if err != nil || len(streams) != 1 || streams[0].Login != "live" {
 		t.Fatalf("expected the eligible live channel: %v %v", streams, err)
 	}
 	detailsUnavailable = true
-	streams, _, _, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
+	streams, _, _, _, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
 	if err != nil || len(streams) != 1 || streams[0].Login != "live" {
 		t.Fatalf("expected the eligible channel from the directory: %v %v", streams, err)
 	}
 	offeredCampaign = "other"
-	streams, _, _, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
+	streams, _, _, _, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
 	if err == nil || len(streams) != 0 {
 		t.Fatalf("fallback accepted a different campaign or hid missing details: %v %v", streams, err)
+	}
+	rawSingleOffline = true
+	streams, checked, total, status, err := client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
+	if err != nil || len(streams) != 0 || checked != 1 || total != 1 || !strings.Contains(status, "один канал — offline. Сейчас он офлайн.") {
+		t.Fatalf("expected a verified offline channel from fallback details: %v %d/%d %q %v", streams, checked, total, status, err)
 	}
 }

@@ -337,7 +337,10 @@ func (c *GQLClient) StreamMetadata(ctx context.Context, login string) (Stream, e
 	if err := c.do(ctx, "VideoPlayerStreamInfoOverlayChannel", query, map[string]any{"channel": login}, &data); err != nil {
 		return Stream{}, err
 	}
-	if data.User == nil || data.User.Stream == nil {
+	if data.User == nil {
+		return Stream{}, errors.New("Twitch не вернул данные пользователя канала")
+	}
+	if data.User.Stream == nil {
 		return Stream{}, fmt.Errorf("%w: %s", ErrStreamOffline, login)
 	}
 	result := Stream{Login: data.User.Login, ChannelID: data.User.ID, BroadcastID: data.User.Stream.ID}
