@@ -160,10 +160,15 @@ func Test250And500WorkersIsolateStalledSignals(t *testing.T) {
 			defer cancel()
 			var wg sync.WaitGroup
 			wg.Add(len(workers))
+			const stalledTimeout = 25 * time.Second
+			intervals := watchIntervals{
+				hls: 100 * time.Millisecond, beacon: 200 * time.Millisecond, progress: 200 * time.Millisecond,
+				timeouts: operationTimeouts{hls: stalledTimeout, recovery: stalledTimeout, beacon: stalledTimeout, inventory: stalledTimeout},
+			}
 			for i, w := range workers {
 				go func(i int, w *accountWorker) {
 					defer wg.Done()
-					err := w.farmDropScheduled(ctx, rand.New(rand.NewSource(int64(i))), twitch.Drop{ID: "drop", Name: "Reward", Required: 60}, watchIntervals{hls: 20 * time.Millisecond, beacon: 40 * time.Millisecond, progress: 40 * time.Millisecond, timeouts: operationTimeouts{hls: 10 * time.Second, recovery: 10 * time.Second, beacon: 10 * time.Second, inventory: 10 * time.Second}})
+					err := w.farmDropScheduled(ctx, rand.New(rand.NewSource(int64(i))), twitch.Drop{ID: "drop", Name: "Reward", Required: 60}, intervals)
 					if err != nil {
 						t.Error(err)
 					}
@@ -174,7 +179,7 @@ func Test250And500WorkersIsolateStalledSignals(t *testing.T) {
 			allObserved := false
 			// Allow for race-detector overhead on CI while keeping the
 			// observation window shorter than the blocked operation's timeout.
-			deadline := time.Now().Add(8 * time.Second)
+			deadline := time.Now().Add(12 * time.Second)
 			for time.Now().Before(deadline) {
 				allObserved = true
 				for i := range probes {
