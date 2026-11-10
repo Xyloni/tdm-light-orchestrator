@@ -32,7 +32,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		panel.Title = "📁 Дневные логи"
 		now := time.Now()
 		if exportValue == "" {
-			panel.Text = "Выберите дату по времени сервера. Бот отправит журнал оркестратора и логи майнеров за этот день одним ZIP-архивом."
+			panel.Text = "📅 Дата архива\nВыберите день по времени сервера.\n\n📦 Содержимое ZIP\nЖурнал оркестратора и логи майнеров."
 		} else {
 			name, data, message := s.exportLogs(context.Background(), exportValue)
 			panel.Text = message
@@ -71,7 +71,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 	case "quarantine":
 		panel.Text = s.command("quarantine")
 	case "accounts":
-		panel.Text = "Отправьте файл .txt документом для загрузки в свободный пул. Для загрузки в конкретный пул откройте игру и нажмите «Загрузить аккаунты»."
+		panel.Text = "📥 Свободный пул\nОтправьте .txt документом в этот чат.\n\n🎮 Пул игры\nОткройте игру → Пул аккаунтов → Загрузить .txt."
 		row(button("Закрепить аккаунт", "prompt:assign"), button("Вернуть в свободный пул", "prompt:free"))
 		row(button("Очистить свободный пул", "clear-free"), button("Карантин", "quarantine"))
 		row(button("Выгрузить свободный пул .txt", "export:free"))
@@ -88,7 +88,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		row(button("Аккаунты", "accounts"))
 	case "notifications":
 		s.mu.Lock()
-		panel.Text = "Уведомления. Нажмите на событие, чтобы изменить его настройку.\n" + s.setDigest("")
+		panel.Text = "🔔 Доставка\nНажмите на событие, чтобы переключить его.\n\n🕘 Суточная сводка\n" + s.setDigest("")
 		row(button("Настроить суточную сводку", "prompt:digest"))
 		if s.state.NotificationsMuted {
 			row(button("Включить доставку", "notify:all:on"))
@@ -111,7 +111,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		s.mu.Lock()
 		panel.Text = s.previewSchedule("all", mode, time.Now())
 		s.mu.Unlock()
-		row(button("Сравнить со скоростью", "preview-speed"), button("Сравнить с экономией", "preview-resources"))
+		row(button("Скорость", "preview-speed"), button("Экономия", "preview-resources"))
 		row(button("Перегруппировать по сохранённому режиму", "regroup-all"))
 	case "regroup-all", "regroup-all-confirm":
 		s.mu.Lock()
@@ -124,7 +124,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		s.mu.Lock()
 		options := s.minerOptions()
 		s.mu.Unlock()
-		panel.Text = "Параметры применяются со следующей группы."
+		panel.Text = "🎛 Параметры майнеров\nИзменения вступят в силу со следующей группы."
 		for _, option := range []struct {
 			key, label string
 			on         bool
@@ -169,7 +169,11 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 			panel.Text = s.command("trim confirm") + "\n"
 		}
 		s.mu.Lock()
-		panel.Text += "Режим: " + s.state.Settings.modeName() + "."
+		cfg := s.state.Settings
+		if panel.Text != "" {
+			panel.Text += "\n"
+		}
+		panel.Text += fmt.Sprintf("⚙️ Текущие настройки\nРежим: %s\nЛимит: %d игр / %d аккаунтов\nРезерв кампании: %d мин\nСтартовая скорость: %d%%\nОпрос Twitch: %d сек.", cfg.modeName(), cfg.MaxGames, cfg.MaxAccounts, cfg.ReserveMinutes, cfg.ExpectedRatePercent, cfg.DiscoverySeconds)
 		if s.state.Settings.SaveResources {
 			row(button("Экономия → включить скорость", "speed"))
 		} else {
@@ -219,7 +223,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 			sort.Strings(keys)
 			page, _ := strconv.Atoi(value)
 			page = max(0, min(page, max(0, len(keys)-1)/8))
-			panel.Text = "Выберите игру."
+			panel.Text = fmt.Sprintf("Игр в списке: %d\n\nВыберите игру, чтобы открыть её состояние и действия.", len(keys))
 			row(button("Найти игру в Twitch", "prompt:find"), button("Ввести точное название", "prompt:add"))
 			if len(keys) == 0 {
 				panel.Text = "Игры ещё не добавлены."
@@ -233,16 +237,35 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 			if (page+1)*8 < len(keys) {
 				row(button("Следующие", fmt.Sprintf("games:%d", page+1)))
 			}
-		case "game", "stop", "resume", "restart", "regroup", "regroup-confirm", "remove", "remove-release-confirm", "remove-delete-confirm", "clear-game", "clear-release-confirm", "clear-delete-confirm", "report", "game-quarantine", "game-stats", "game-lagging", "game-preview", "game-preview-speed", "game-preview-resources":
+		case "game", "game-pool", "game-options", "stop", "resume", "restart", "regroup", "regroup-confirm", "remove", "remove-release-confirm", "remove-delete-confirm", "clear-game", "clear-release-confirm", "clear-delete-confirm", "report", "game-quarantine", "game-stats", "game-lagging", "game-preview", "game-preview-speed", "game-preview-resources":
 			panel.Text = "Игра больше не найдена."
 			for key, g := range s.state.Games {
 				if gameRef(key) != value {
 					continue
 				}
-				panel.Text = g.Name + "\n" + s.queueSummary(key, g, time.Now())
+				panel.Text = g.Name + "\n\n📡 Текущее состояние\n" + s.queueSummary(key, g, time.Now())
 				switch kind {
 				case "stop", "resume", "restart":
-					panel.Text += "\n" + s.controlGame(kind, key)
+					result := s.controlGame(kind, key)
+					panel.Text = g.Name + "\n\n" + result
+				case "game-pool":
+					panel.Title = "👥 Пул · " + g.Name
+					_, count := s.poolFingerprint(key)
+					panel.Text = fmt.Sprintf("Аккаунты: %d / %d\n\nЗдесь можно загрузить или выгрузить список и изменить целевой размер пула.", count, g.Target)
+					row(button("Загрузить .txt", "prompt:upload:"+value), button("Выгрузить .txt", "export:"+value))
+					row(button("Размер пула", "prompt:target:"+value), button("Карантин", "game-quarantine:"+value))
+					row(button("Очистить пул", "clear-game:"+value))
+					row(button("К игре", "game:"+value))
+					return panel
+				case "game-options":
+					panel.Title = "⚙️ Настройки · " + g.Name
+					cfg := s.gameSettings(g)
+					panel.Text = fmt.Sprintf("Режим: %s\nРезерв кампании: %d мин\n\n%s", cfg.modeName(), cfg.ReserveMinutes, s.exclusionList(key))
+					row(button("Правила игры", "prompt:policy:"+value))
+					row(button("Исключить награду", "prompt:exclude:"+value), button("Вернуть награду", "prompt:include:"+value))
+					row(button("Удалить игру", "remove:"+value))
+					row(button("К игре", "game:"+value))
+					return panel
 				case "report":
 					panel.Title = "📋 История кампаний · " + g.Name
 					panel.Text = s.campaignReport(g)
@@ -254,7 +277,9 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 						mode = strings.TrimPrefix(kind, "game-preview-")
 					}
 					panel.Text = s.previewSchedule("game:"+key, mode, time.Now())
-					row(button("Сравнить со скоростью", "game-preview-speed:"+value), button("Сравнить с экономией", "game-preview-resources:"+value))
+					row(button("Скорость", "game-preview-speed:"+value), button("Экономия", "game-preview-resources:"+value))
+					row(button("К игре", "game:"+value))
+					return panel
 				case "game-lagging":
 					panel.Title = "🐢 Отстающие · " + g.Name
 					panel.Text = s.laggingReport(key, time.Now()).text()
@@ -266,7 +291,10 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 					row(button("Обновить", action), button("К игре", "game:"+value))
 					return panel
 				case "game-quarantine":
-					panel.Text += "\n" + s.quarantineSummary(key)
+					panel.Title = "🛡 Карантин · " + g.Name
+					panel.Text = s.quarantineSummary(key)
+					row(button("К пулу", "game-pool:"+value))
+					return panel
 				case "clear-game", "remove":
 					_, count := s.poolFingerprint(key)
 					prefix := "clear"
@@ -309,17 +337,12 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 					}
 				}
 				if !g.Removing {
-					row(button("Размер пула", "prompt:target:"+value), button("Исключить награду", "prompt:exclude:"+value))
-					row(button("Вернуть награду", "prompt:include:"+value), button("Удалить игру", "remove:"+value))
-					row(button("Загрузить аккаунты", "prompt:upload:"+value), button("Очистить пул", "clear-game:"+value))
-					row(button("Выгрузить аккаунты .txt", "export:"+value))
-					row(button("Правила игры", "prompt:policy:"+value), button("История кампаний", "report:"+value))
-					row(button("Карантин", "game-quarantine:"+value), button("Статистика", "game-stats:"+value))
-					row(button("Отстающие", "game-lagging:"+value))
-					row(button("Предпросмотр расписания", "game-preview:"+value))
+					row(button("Пул аккаунтов", "game-pool:"+value), button("Настройки игры", "game-options:"+value))
+					row(button("Статистика", "game-stats:"+value), button("История кампаний", "report:"+value))
+					row(button("Предпросмотр", "game-preview:"+value), button("Отстающие", "game-lagging:"+value))
 					if c := g.Campaigns[g.Current]; c != nil && c.Finished == "" && len(c.Group) > 0 {
 						if !g.Paused && s.active[key] != nil && !s.active[key].stopping {
-							panel.Text += "\n" + s.groupSummary(key, c, time.Now())
+							row(button("Обновить", "game:"+value))
 						}
 						row(button("Перегруппировать", "regroup:"+value))
 					}

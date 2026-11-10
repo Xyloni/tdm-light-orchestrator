@@ -12,6 +12,7 @@ type simulationJob struct {
 	Name                      string
 	Accounts                  int
 	Ready, Deadline, Duration time.Duration
+	Reserve                   time.Duration
 	Economy                   bool
 	Occupied                  int // Existing work outside the selected preview scope.
 }
@@ -70,7 +71,7 @@ func simulateSchedule(jobs []simulationJob, maxGames, maxAccounts int) ([]simula
 				return running[a].slot
 			}
 			latest := func(n int) time.Duration {
-				return jobs[n].Deadline - time.Duration((running[n].left-1)/maxAccounts+1)*jobs[n].Duration
+				return jobs[n].Deadline - jobs[n].Reserve - time.Duration((running[n].left-1)/maxAccounts+1)*jobs[n].Duration
 			}
 			return latest(a) < latest(b)
 		})
@@ -80,9 +81,9 @@ func simulateSchedule(jobs []simulationJob, maxGames, maxAccounts int) ([]simula
 				continue
 			}
 			left := job.Deadline - now
-			count := planGroup(r.left, load, maxAccounts, left, job.Duration, job.Economy)
+			count := planGroup(r.left, load, maxAccounts, left-job.Reserve, job.Duration, job.Economy)
 			normalWaves := (r.left-1)/maxAccounts + 1
-			if count > max(0, maxAccounts-load) && latestRelease > now && (job.Deadline-latestRelease)/job.Duration >= time.Duration(normalWaves) {
+			if count > max(0, maxAccounts-load) && latestRelease > now && (job.Deadline-job.Reserve-latestRelease)/job.Duration >= time.Duration(normalWaves) {
 				continue
 			}
 			if !r.slot {
@@ -133,15 +134,19 @@ func formatSimulation(jobs []simulationJob, maxGames, maxAccounts int, now time.
 	}
 	results, peak, complete := simulateSchedule(jobs, maxGames, maxAccounts)
 	var out strings.Builder
-	fmt.Fprintf(&out, "Расчётный план · пик %d аккаунтов при лимите %d.", peak, maxAccounts)
+	fmt.Fprintf(&out, "📊 Нагрузка плана\nПик аккаунтов: %d / %d", peak, maxAccounts)
 	if !complete {
-		fmt.Fprint(&out, " Достигнут предел расчёта, показан частичный результат.")
+		fmt.Fprint(&out, "\n⚠️ Показан частичный результат.")
 	}
 	for _, r := range results {
 		if r.Job.Occupied > 0 {
 			continue
 		}
-		fmt.Fprintf(&out, "\n%s · %d акк.", brief(r.Job.Name, 60), r.Job.Accounts)
+		mode := "Скорость"
+		if r.Job.Economy {
+			mode = "Экономия ресурсов"
+		}
+		fmt.Fprintf(&out, "\n\n🎮 %s\nРежим: %s\nАккаунты: %d", brief(r.Job.Name, 60), mode, r.Job.Accounts)
 		if len(r.Groups) > 0 {
 			var chunks []string
 			for i := 0; i < len(r.Groups) && len(chunks) < 5; {
@@ -155,16 +160,24 @@ func formatSimulation(jobs []simulationJob, maxGames, maxAccounts int, now time.
 					chunks = append(chunks, "…")
 				}
 			}
-			fmt.Fprintf(&out, " · %d групп (%s) · ", len(r.Groups), strings.Join(chunks, " + "))
+			fmt.Fprintf(&out, "\nГруппы: %d (%s)", len(r.Groups), strings.Join(chunks, " + "))
 			if now.IsZero() {
-				fmt.Fprintf(&out, "старт +%s, конец +%s", r.Started, r.Finish)
+				fmt.Fprintf(&out, "\nСтарт: +%s\nФиниш: +%s", r.Started, r.Finish)
 			} else {
-				fmt.Fprintf(&out, "%s → %s", now.Add(r.Started).Format("02.01 15:04"), now.Add(r.Finish).Format("02.01 15:04"))
+				fmt.Fprintf(&out, "\nСтарт: %s\nФиниш: %s", now.Add(r.Started).Format("02.01 в 15:04 MST"), now.Add(r.Finish).Format("02.01 в 15:04 MST"))
 			}
-			fmt.Fprintf(&out, " · запас %s", (r.Job.Deadline - r.Finish).Round(time.Minute))
+			if r.Job.Reserve > 0 {
+				fmt.Fprintf(&out, "\nРезерв кампании: %d мин", r.Job.Reserve/time.Minute)
+			}
+			remaining := (r.Job.Deadline - r.Finish - r.Job.Reserve).Round(time.Minute)
+			if remaining >= 0 {
+				fmt.Fprintf(&out, "\nДо дедлайна сверх резерва: %s", remaining)
+			} else {
+				fmt.Fprintf(&out, "\n⚠️ Резерва не хватает: %s", -remaining)
+			}
 		}
 		if r.Missed > 0 {
-			fmt.Fprintf(&out, " · риск: %d акк. не успевают", r.Missed)
+			fmt.Fprintf(&out, "\n⚠️ Риск дедлайна: %d аккаунтов", r.Missed)
 		}
 	}
 	return out.String()
@@ -236,7 +249,7 @@ func (s *scheduler) previewSchedule(scope, mode string, now time.Time) string {
 		if (one || g.Mode == "") && (mode == "speed" || mode == "resources") {
 			cfg.SaveResources = mode == "resources"
 		}
-		jobs = append(jobs, simulationJob{Name: g.Name, Accounts: accounts, Ready: max(0, c.Starts.Sub(now)), Deadline: c.Ends.Sub(now), Duration: s.duration(g, c), Economy: cfg.SaveResources})
+		jobs = append(jobs, simulationJob{Name: g.Name, Accounts: accounts, Ready: max(0, c.Starts.Sub(now)), Deadline: c.Ends.Sub(now), Duration: s.duration(g, c), Reserve: time.Duration(cfg.ReserveMinutes) * time.Minute, Economy: cfg.SaveResources})
 	}
 	if one {
 		found := false
@@ -250,7 +263,7 @@ func (s *scheduler) previewSchedule(scope, mode string, now time.Time) string {
 			return "У выбранной игры нет доступной кампании и аккаунтов для прогноза либо она на паузе."
 		}
 	}
-	return "Предпросмотр без изменений. Для выбранных игр считаем запуск заново; длительность группы оценочная.\n" + formatSimulation(jobs, s.state.Settings.MaxGames, s.state.Settings.MaxAccounts, now.Local())
+	return formatSimulation(jobs, s.state.Settings.MaxGames, s.state.Settings.MaxAccounts, now.Local()) + "\n\nℹ️ Расчёт с нуля. Активные группы не меняются."
 }
 
 func simulateInput(input string) string {

@@ -100,7 +100,7 @@ func (s *AccountState) tailLogs(n int) []string {
 // внутри группы каждый аккаунт — отдельная горутина.
 type Manager struct {
 	cfg             *config.Config
-	campaignStreams []twitch.Stream
+	campaignStreams atomic.Pointer[[]twitch.Stream]
 	groups          [][]*parser.Account
 	states          map[string]*AccountState // ключ — login (логины должны быть уникальны)
 	http            *http.Client

@@ -3,6 +3,8 @@ package bot
 import (
 	"html"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 func telegramPanelTitle(action string) string {
@@ -22,8 +24,10 @@ func telegramPanelTitle(action string) string {
 		return "👥 Пулы аккаунтов"
 	case kind == "notifications" || kind == "notify":
 		return "🔔 Уведомления"
-	case kind == "help":
+	case kind == "help" || kind == "help-commands":
 		return "📖 Справка"
+	case kind == "logs":
+		return "📁 Дневные логи"
 	case kind == "quarantine" || kind == "game-quarantine":
 		return "🛡 Карантин"
 	case kind == "report":
@@ -78,7 +82,7 @@ func formatTelegramPanel(action, title, text string) string {
 				label, count, _ := strings.Cut(item, ": ")
 				out.WriteString(html.EscapeString(label) + " <b>" + html.EscapeString(count) + "</b>")
 			}
-		case (kind == "status" && telegramStatusHeading(line)) || ((kind == "menu" || kind == "") && line == "📡 Фарм сейчас") || line == "Самые медленные:":
+		case telegramSectionHeading(line) || strings.HasPrefix(line, "🎮 ") || line == "Самые медленные:":
 			out.WriteString("<b>" + escaped + "</b>")
 		case kind == "status" && strings.HasPrefix(line, "• "):
 			out.WriteString("<b>" + escaped + "</b>")
@@ -86,8 +90,6 @@ func formatTelegramPanel(action, title, text string) string {
 			out.WriteString("<b>Пример:</b> <code>" + html.EscapeString(strings.TrimPrefix(line, "Пример: ")) + "</code>")
 		case strings.HasPrefix(line, "Сейчас: "):
 			out.WriteString("<b>Сейчас:</b>" + strings.TrimPrefix(escaped, "Сейчас:"))
-		case (kind == "stats" || kind == "game-stats") && (line == "📅 Сегодня" || line == "🗓 Последние 7 дней" || line == "🏁 За всё время"):
-			out.WriteString("<b>" + escaped + "</b>")
 		case kind == "report" && strings.Contains(line, " · до "):
 			name, details, _ := strings.Cut(line, " · ")
 			out.WriteString("<b>" + html.EscapeString(name) + "</b>\n" + html.EscapeString(details))
@@ -96,21 +98,40 @@ func formatTelegramPanel(action, title, text string) string {
 		case strings.HasPrefix(line, "Сегодня:") || strings.HasPrefix(line, "За 7 календарных дней:") || strings.HasPrefix(line, "За всё время:"):
 			label, rest, _ := strings.Cut(line, ":")
 			out.WriteString("<b>" + html.EscapeString(label) + ":</b>" + html.EscapeString(rest))
-		case strings.HasPrefix(line, "Режим:") || strings.HasPrefix(line, "Последний успешный опрос Twitch:"):
-			label, rest, _ := strings.Cut(line, ":")
-			out.WriteString("<b>" + html.EscapeString(label) + ":</b>" + html.EscapeString(rest))
+		case strings.HasPrefix(line, "ℹ️ "):
+			out.WriteString("<i>" + escaped + "</i>")
 		case strings.Contains(line, " · пул ") && kind == "status":
 			out.WriteString("<b>" + escaped + "</b>")
 		default:
-			out.WriteString(escaped)
+			label, value, ok := strings.Cut(line, ": ")
+			if ok && telegramMetricLabel(label) {
+				out.WriteString("<b>" + html.EscapeString(label) + ":</b> " + html.EscapeString(value))
+			} else {
+				out.WriteString(escaped)
+			}
 		}
 	}
 	return out.String()
 }
 
-func telegramStatusHeading(line string) bool {
+func telegramSectionHeading(line string) bool {
 	switch line {
-	case "📊 Загрузка", "⚙️ Настройки фарма", "🟣 Связь с Twitch", "🎮 Игры":
+	case "📊 Загрузка", "⚙️ Настройки фарма", "🟣 Связь с Twitch", "📡 Фарм сейчас",
+		"📊 Нагрузка плана", "📡 Текущее состояние", "⚙️ Текущие настройки", "🎛 Параметры майнеров",
+		"📥 Свободный пул", "🔔 Доставка", "🕘 Суточная сводка", "📅 Дата архива", "📦 Содержимое ZIP",
+		"📅 Сегодня", "🗓 Последние 7 дней", "🏁 За всё время":
+		return true
+	}
+	return false
+}
+
+func telegramMetricLabel(label string) bool {
+	switch label {
+	case "Пик аккаунтов", "Аккаунты", "Группы", "Старт", "Финиш", "Резерв кампании",
+		"До дедлайна сверх резерва", "Режим", "Лимит", "Стартовая скорость", "Опрос Twitch",
+		"Игры в работе", "Аккаунты в работе", "Свободный пул", "Карантин", "Последний успешный опрос",
+		"Последний успешный опрос Twitch", "Активная группа", "В очереди", "Отстают", "Проверено",
+		"Среднее отставание", "Подтверждённых эфиров кампании", "Игра", "Игр в списке", "Следующая группа", "Первая группа":
 		return true
 	}
 	return false
@@ -135,6 +156,9 @@ func telegramButton(action, label string) string {
 	}
 	if strings.HasPrefix(label, "○ ") {
 		return "⚪ " + strings.TrimPrefix(label, "○ ")
+	}
+	if first, _ := utf8.DecodeRuneInString(label); unicode.Is(unicode.So, first) {
+		return label
 	}
 	if kind == "help-commands" {
 		return "⌨️ " + label
@@ -168,7 +192,7 @@ func telegramButton(action, label string) string {
 	default:
 		icon = map[string]string{
 			"status": "📡", "stats": "📊", "game-stats": "📊", "games": "🎮", "game": "🎮", "find-choice": "🎮",
-			"accounts": "👥", "assign": "📌", "free": "📤", "target": "🎯", "upload": "📎",
+			"accounts": "👥", "game-pool": "👥", "game-options": "⚙️", "assign": "📌", "free": "📤", "target": "🎯", "upload": "📎",
 			"settings": "⚙️", "miner-options": "⚙️", "policy": "⚙️", "notifications": "🔔", "digest": "🕘",
 			"help": "📖", "menu": "🏠", "resume": "▶️", "stop": "⏸️", "restart": "🔄", "report": "📋",
 			"lagging": "🐢", "game-lagging": "🐢", "quarantine": "🛡️", "game-quarantine": "🛡️", "speed": "🔁", "resources": "🔁", "limits": "🎚️",

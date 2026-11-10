@@ -21,10 +21,14 @@ type campaignAirtime struct {
 	checked, total int
 	streams        []twitch.Stream
 	failed         bool
+	failures       int
 	reason         string
 }
 
-func (a *campaignAirtime) includes(previous []twitch.Stream) bool {
+func (a *campaignAirtime) sameStreams(previous []twitch.Stream) bool {
+	if len(a.streams) != len(previous) {
+		return false
+	}
 	for _, old := range previous {
 		found := false
 		for _, current := range a.streams {
@@ -127,14 +131,26 @@ func (s *scheduler) checkCampaignAirtime(ctx context.Context, key string, g *gam
 			air.reason = err.Error()
 		}
 		air.streams, air.checked, air.total = streams, checked, total
+		if len(streams) == 0 && err != nil {
+			air.failures++
+		} else {
+			air.failures = 0
+		}
 		if len(streams) == 0 && checked > 0 && checked < total {
 			air.offset = (offset + checked) % total
 		}
 		ready := len(streams) > 0
-		if !wasChecked || wasReady != ready || (!ready && wasFailed != air.failed) {
+		active := s.active[key]
+		stoppingAfterFailures := air.failures == 2 && active != nil && !active.groupStarted.IsZero() && !active.stopping
+		if !wasChecked || wasReady != ready || (!ready && wasFailed != air.failed) || stoppingAfterFailures {
 			message := air.status()
 			s.event("campaign_airtime game=%q campaign=%q previous=%q status=%q", game, campaignName, previous, message)
 			if !g.Paused && !g.Removing {
+				if stoppingAfterFailures {
+					message += "\nГруппа приостанавливается после повторного сбоя проверки."
+				} else if active != nil && !active.groupStarted.IsZero() && air.failures == 1 {
+					message += "\nТекущая группа продолжает работу до повторной проверки."
+				}
 				s.sendNotice("airtime", fmt.Sprintf("«%s» · %s\n%s", game, campaignName, message))
 			}
 		}

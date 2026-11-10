@@ -5,8 +5,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xyloni/tdm-light-orchestrator/config"
 	"github.com/xyloni/tdm-light-orchestrator/parser"
 )
+
+func TestScheduleUsesHighestTierAndOneReserveForAllGroups(t *testing.T) {
+	rewards := []rewardRequirement{
+		{Minutes: 60}, {Minutes: 120}, {Minutes: 240}, {Minutes: 360}, {Minutes: 420}, {Minutes: 480},
+	}
+	if got := requiredMinutes(rewards, *config.Default()); got != 480 {
+		t.Fatalf("required minutes = %d, want 480", got)
+	}
+	job := simulationJob{Name: "Example", Accounts: 6, Duration: time.Hour,
+		Deadline: 130 * time.Minute, Reserve: 10 * time.Minute, Economy: true}
+	results, peak, complete := simulateSchedule([]simulationJob{job}, 1, 4)
+	result := results[0]
+	if !complete || peak != 3 || len(result.Groups) != 2 || result.Finish != 2*time.Hour || result.Missed != 0 {
+		t.Fatalf("expected two waves and one shared reserve: %+v, peak=%d", result, peak)
+	}
+}
 
 func TestSimulationKeepsSlotThroughGroupsAndReportsMisses(t *testing.T) {
 	jobs := []simulationJob{

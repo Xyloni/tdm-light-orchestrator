@@ -315,6 +315,14 @@ func (w *accountWorker) farmDropScheduled(parent context.Context, rnd *rand.Rand
 		if ctx.Err() != nil {
 			return nil
 		}
+		if variant != "" && !w.m.allowsStream(stream) {
+			streams.clear()
+			variant = ""
+			nextOpen = time.Time{}
+			hlsRetry, transientFailures = false, 0
+			retryQueuedAt = time.Time{}
+			w.st.addLog("канал " + stream.Login + " больше не подтверждён для кампании; выбираю другой")
+		}
 		if variant == "" {
 			if time.Now().Before(nextOpen) {
 				if waitForWork(nextOpen) {
@@ -338,6 +346,9 @@ func (w *accountWorker) farmDropScheduled(parent context.Context, rnd *rand.Rand
 				nextOpen = time.Now().Add(delay)
 				w.st.addLog(fmt.Sprintf("следующая попытка выбора канала через %s", delay.Round(time.Second)))
 				continue // Inventory continues during the bounded playback retry pause.
+			}
+			if !w.m.allowsStream(selected) {
+				continue
 			}
 			stream, variant = selected, playlist
 			rateStarted = time.Now()

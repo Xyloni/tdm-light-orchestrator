@@ -74,7 +74,7 @@ func (s *scheduler) queueSummary(key string, g *gameState, now time.Time) string
 		return "Ожидание: Twitch пока не показывает активную кампанию для игры."
 	}
 	if a != nil && !a.groupStarted.IsZero() {
-		message := s.groupSummary(key, c, now) + " " + s.airtimeFor(key, c.ID).summary()
+		message := s.groupSummary(key, c, now) + "\n" + s.airtimeFor(key, c.ID).summary()
 		for _, progress := range a.progress {
 			for _, reward := range progress.RewardProgress {
 				if reward.Known && reward.Minutes > 0 {
@@ -82,7 +82,7 @@ func (s *scheduler) queueSummary(key string, g *gameState, now time.Time) string
 				}
 			}
 		}
-		return message + " Twitch пока не подтвердил минуты группы."
+		return message + "\nℹ️ Twitch пока не подтвердил минуты группы."
 	}
 	count := len(pending(s.state, key, c))
 	usable, free := 0, 0
@@ -112,8 +112,9 @@ func (s *scheduler) queueSummary(key string, g *gameState, now time.Time) string
 	} else {
 		duration := s.duration(g, c)
 		running, limit := s.runningAccounts(), s.state.Settings.MaxAccounts
-		group := planGroup(count, running, limit, c.Ends.Sub(now), duration, s.gameSettings(g).SaveResources)
-		if group > max(0, limit-running) && s.canWaitForCapacity(c, count, duration, now) {
+		deadline := s.planDeadline(g, c)
+		group := planGroup(count, running, limit, deadline.Sub(now), duration, s.gameSettings(g).SaveResources)
+		if group > max(0, limit-running) && s.canWaitForCapacity(deadline, count, duration, now) {
 			message = "Ожидание: свободный лимит аккаунтов."
 		}
 	}

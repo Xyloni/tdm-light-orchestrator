@@ -168,12 +168,20 @@ func (s *scheduler) warn(message string) {
 	s.sendNotice("capacity", message)
 }
 
-func estimate(minutes int, rate float64, reserve int) time.Duration {
-	return time.Duration(math.Ceil(float64(minutes)/rate)+float64(reserve)) * time.Minute
+func estimate(minutes int, rate float64) time.Duration {
+	return time.Duration(math.Ceil(float64(minutes)/rate)) * time.Minute
 }
 
 func (s *scheduler) duration(g *gameState, c *campaign) time.Duration {
-	return estimate(c.Minutes, s.planningRate(c), s.gameSettings(g).ReserveMinutes)
+	minutes := c.Minutes
+	if len(c.Rewards) > 0 {
+		minutes = requiredMinutes(c.Rewards, s.configForGame(g))
+	}
+	return max(time.Minute, estimate(minutes, s.planningRate(c)))
+}
+
+func (s *scheduler) planDeadline(g *gameState, c *campaign) time.Time {
+	return c.Ends.Add(-time.Duration(s.gameSettings(g).ReserveMinutes) * time.Minute)
 }
 
 func (s *scheduler) planningRate(c *campaign) float64 {
@@ -236,7 +244,7 @@ func (s *scheduler) latestStart(g *gameState, c *campaign, target int) time.Time
 	if duration > 0 && time.Duration(waves) > time.Duration(1<<63-1)/duration {
 		return time.Time{}
 	}
-	return c.Ends.Add(-time.Duration(waves) * duration)
+	return s.planDeadline(g, c).Add(-time.Duration(waves) * duration)
 }
 
 func (s *scheduler) less(gameA *gameState, a *campaign, gameB *gameState, b *campaign) bool {
@@ -280,7 +288,7 @@ func terminal(status string) bool {
 }
 
 // Wait for capacity only when the full normal-limit schedule still fits.
-func (s *scheduler) canWaitForCapacity(c *campaign, count int, duration time.Duration, now time.Time) bool {
+func (s *scheduler) canWaitForCapacity(deadline time.Time, count int, duration time.Duration, now time.Time) bool {
 	limit := s.state.Settings.MaxAccounts
 	waves := (count-1)/limit + 1
 	release := now
@@ -307,7 +315,7 @@ func (s *scheduler) canWaitForCapacity(c *campaign, count int, duration time.Dur
 			release = expected
 		}
 	}
-	return hasRunning && c.Ends.Sub(release)/duration >= time.Duration(waves)
+	return hasRunning && deadline.Sub(release)/duration >= time.Duration(waves)
 }
 
 func (s *scheduler) launchGroup(key string, g *gameState, c *campaign, a *activeGame, now time.Time) {
@@ -328,8 +336,9 @@ func (s *scheduler) launchGroup(key string, g *gameState, c *campaign, a *active
 		}
 
 		running, limit := s.runningAccounts(), s.state.Settings.MaxAccounts
-		count := planGroup(len(names), running, limit, c.Ends.Sub(now), duration, s.gameSettings(g).SaveResources)
-		if count > max(0, limit-running) && s.canWaitForCapacity(c, len(names), duration, now) {
+		deadline := s.planDeadline(g, c)
+		count := planGroup(len(names), running, limit, deadline.Sub(now), duration, s.gameSettings(g).SaveResources)
+		if count > max(0, limit-running) && s.canWaitForCapacity(deadline, len(names), duration, now) {
 			return
 		}
 		c.Group = append([]string(nil), names[:count]...)
@@ -372,7 +381,7 @@ func (s *scheduler) launchGroup(key string, g *gameState, c *campaign, a *active
 	s.sendNotice("group_start", fmt.Sprintf("«%s» · %s: старт группы из %d аккаунтов.", g.Name, c.Name, len(accounts)))
 	a.rateChecked = time.Time{}
 	total := s.runningAccounts()
-	s.event("group_started game=%q campaign=%q mode=%q restored=%t group=%d pending_before=%d time_left=%s rate=%.3f reserve_min=%d duration=%s predicted_waves=%d active_total=%d limit=%d log_dir=%q", g.Name, c.Name, s.gameSettings(g).modeName(), restored, len(accounts), len(names), c.Ends.Sub(now).Round(time.Second), s.planningRate(c), s.gameSettings(g).ReserveMinutes, duration, max(0, int(c.Ends.Sub(now)/duration)), total, s.state.Settings.MaxAccounts, filepath.Base(a.logDir))
+	s.event("group_started game=%q campaign=%q mode=%q restored=%t group=%d pending_before=%d time_left=%s rate=%.3f reserve_min=%d duration=%s predicted_waves=%d active_total=%d limit=%d log_dir=%q", g.Name, c.Name, s.gameSettings(g).modeName(), restored, len(accounts), len(names), c.Ends.Sub(now).Round(time.Second), s.planningRate(c), s.gameSettings(g).ReserveMinutes, duration, max(0, int(s.planDeadline(g, c).Sub(now)/duration)), total, s.state.Settings.MaxAccounts, filepath.Base(a.logDir))
 	if total > s.state.Settings.MaxAccounts {
 		s.warn(fmt.Sprintf("«%s»: для дедлайна запущена группа из %d. Общая нагрузка %d при лимите %d. Команда: /reduce_load", g.Name, len(accounts), total, s.state.Settings.MaxAccounts))
 	}
@@ -421,10 +430,23 @@ func (s *scheduler) tick(ctx context.Context, now time.Time) {
 			c = next
 		}
 		air := s.checkCampaignAirtime(ctx, key, g, c, now)
-		if len(air.streams) == 0 || (!a.groupStarted.IsZero() && !air.includes(a.streams)) {
+		if len(air.streams) == 0 {
+			if !a.groupStarted.IsZero() && air.failures == 1 {
+				continue // Keep the confirmed set until the next poll after one inconclusive result.
+			}
 			a.stopping = true
+			s.event("group_waiting_for_airtime game=%q campaign=%q reason=%q", g.Name, c.Name, air.status())
 			a.process.stop()
 			continue
+		}
+		if !a.groupStarted.IsZero() && !air.sameStreams(a.streams) {
+			select {
+			case a.process.commands <- minerCommand{UpdateStreams: true, Streams: air.streams}:
+				a.streams = air.streams
+				s.event("group_streams_updated game=%q campaign=%q streams=%d", g.Name, c.Name, len(a.streams))
+			default:
+				// Retry with the latest list once the miner can receive a command.
+			}
 		}
 		s.launchGroup(key, g, c, a, now)
 	}

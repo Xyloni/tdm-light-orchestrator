@@ -482,26 +482,27 @@ func (s *scheduler) groupSummary(key string, c *campaign, now time.Time) string 
 		}
 		running -= remainingActive
 		start = now.Add(max(0, a.groupStarted.Add(duration).Sub(now)))
-		prefix = fmt.Sprintf("Активная группа: %d · ожидают: %d. Состав задан при запуске.", len(c.Group), waiting)
+		prefix = fmt.Sprintf("Активная группа: %d\nВ очереди: %d", len(c.Group), waiting)
 	}
 	if waiting <= 0 {
 		if active {
-			return prefix + " Следующей группы нет."
+			return prefix
 		}
 		return "Ожидающих аккаунтов нет."
 	}
 	if !start.Before(c.Ends) {
-		return prefix + " По прогнозу до следующего запуска времени не осталось."
+		return strings.TrimSpace(prefix + "\n⚠️ По прогнозу времени на следующую группу нет.")
 	}
-	count := planGroup(waiting, running, s.state.Settings.MaxAccounts, c.Ends.Sub(start), duration, s.gameSettings(s.state.Games[key]).SaveResources)
+	deadline := s.planDeadline(s.state.Games[key], c)
+	count := planGroup(waiting, running, s.state.Settings.MaxAccounts, deadline.Sub(start), duration, s.gameSettings(s.state.Games[key]).SaveResources)
 	if active {
 		risk := ""
-		if c.Ends.Sub(start) < duration {
-			risk = " Риск дедлайна: полного времени на следующую группу по прогнозу не хватает."
+		if deadline.Sub(start) < duration {
+			risk = "\n⚠️ До дедлайна может не хватить времени на следующую группу."
 		}
-		return fmt.Sprintf("%s Следующая группа: примерно %d.%s", prefix, count, risk)
+		return fmt.Sprintf("%s\nСледующая группа: около %d%s", prefix, count, risk)
 	}
-	return fmt.Sprintf("Ожидают: %d. Первая группа при запуске сейчас: примерно %d.", waiting, count)
+	return fmt.Sprintf("В очереди: %d\nПервая группа: около %d", waiting, count)
 }
 
 func (s *scheduler) status() string {
@@ -623,7 +624,7 @@ func (s *scheduler) trim(confirm bool) string {
 			progress[p.Login] = struct {
 				status string
 				eta    time.Duration
-			}{p.Status, estimate(minutes, rate, 0)}
+			}{p.Status, estimate(minutes, rate)}
 		}
 		for position, name := range c.Group {
 			p, known := progress[name]

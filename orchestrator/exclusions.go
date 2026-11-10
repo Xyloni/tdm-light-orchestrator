@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -20,13 +21,13 @@ func (s *scheduler) configForGame(g *gameState) config.Config {
 }
 
 func requiredMinutes(rewards []rewardRequirement, cfg config.Config) int {
-	total := 0
+	threshold := 0
 	for _, reward := range rewards {
 		if !cfg.DropIgnored(reward.Name) {
-			total += reward.Minutes
+			threshold = max(threshold, reward.Minutes)
 		}
 	}
-	return total
+	return threshold
 }
 
 // The caller holds the scheduler lock.
@@ -70,11 +71,14 @@ func (s *scheduler) changeExclusion(key, name string, exclude bool) string {
 			continue
 		}
 		minutes := requiredMinutes(c.Rewards, cfg)
-		if c.Minutes == minutes {
+		restored := !exclude && slices.ContainsFunc(c.Rewards, func(reward rewardRequirement) bool {
+			return strings.EqualFold(strings.TrimSpace(reward.Name), name)
+		})
+		if c.Minutes == minutes && !restored {
 			continue
 		}
 		backups[c] = *c
-		if minutes > c.Minutes {
+		if restored {
 			// Accounts previously finished under the old list need an Inventory recheck.
 			results := make(map[string]string, len(c.Results))
 			for login, outcome := range c.Results {

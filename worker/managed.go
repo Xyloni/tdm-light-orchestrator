@@ -9,9 +9,26 @@ import (
 	"github.com/xyloni/tdm-light-orchestrator/twitch"
 )
 
-// SetCampaignStreams must be called before starting managed account workers.
+// SetCampaignStreams publishes an immutable list to all managed workers.
 func (m *Manager) SetCampaignStreams(streams []twitch.Stream) {
-	m.campaignStreams = streams
+	if streams == nil {
+		m.campaignStreams.Store(nil)
+		return
+	}
+	m.campaignStreams.Store(&streams)
+}
+
+func (m *Manager) allowsStream(stream twitch.Stream) bool {
+	allowed := m.campaignStreams.Load()
+	if allowed == nil {
+		return true
+	}
+	for _, candidate := range *allowed {
+		if candidate.ChannelID == stream.ChannelID && candidate.BroadcastID == stream.BroadcastID && candidate.GameID == stream.GameID {
+			return true
+		}
+	}
+	return false
 }
 
 type ManagedRewardProgress struct {

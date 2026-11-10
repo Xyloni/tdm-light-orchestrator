@@ -87,7 +87,7 @@ pre, .help-copy { margin: .55rem 0 0; white-space: pre-wrap; overflow-wrap: anyw
 code { color: #e5c8ff }
 .field-note { margin-bottom: .75rem }
 .mode-link { color: var(--accent); font-size: .83rem }
-.group-summary { margin: .6rem 0; color: var(--ink); border-left: 2px solid #a970ec; padding-left: .65rem }
+.group-summary { margin: .6rem 0; color: var(--ink); border-left: 2px solid #a970ec; padding-left: .65rem; white-space: pre-line }
 @media (max-width: 38rem) {
   main { padding-top: .8rem }
   .masthead, .row, .game-head { align-items: flex-start; flex-wrap: wrap }
@@ -134,7 +134,7 @@ code { color: #e5c8ff }
 <form class="stack" method="post">
 <input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="action" value="game-policy"><input type="hidden" name="game" value="{{.Key}}">
 <label class="field">Режим группировки<select name="mode"><option value="">Общий режим</option><option value="speed" {{if eq .Mode "speed"}}selected{{end}}>Скорость</option><option value="resources" {{if eq .Mode "resources"}}selected{{end}}>Экономия ресурсов</option></select></label>
-<label class="field">Запас в минутах · 0 для общего запаса<input name="reserve" type="number" min="0" max="1440" value="{{.ReserveMinutes}}" required></label>
+<label class="field">Резерв на всю кампанию, мин · 0 для общего значения<input name="reserve" type="number" min="0" max="1440" value="{{.ReserveMinutes}}" required></label>
 <button>Сохранить правила игры</button>
 </form></details>
 <details><summary>История кампаний</summary><pre>{{.Report}}</pre></details>
@@ -231,7 +231,7 @@ code { color: #e5c8ff }
 <hr>
 <form class="stack" method="post">
 <input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="timing">
-<div class="fields"><label class="field">Запас, мин<input type="number" name="reserve" min="1" max="1440" value="{{.Settings.ReserveMinutes}}" required></label><label class="field">Стартовая скорость, %<input type="number" name="rate" min="1" max="100" value="{{.Settings.ExpectedRatePercent}}" required></label><label class="field">Интервал поиска, сек<input type="number" name="interval" min="15" max="86400" value="{{.Settings.DiscoverySeconds}}" required></label></div>
+<div class="fields"><label class="field">Резерв на всю кампанию, мин<input type="number" name="reserve" min="1" max="1440" value="{{.Settings.ReserveMinutes}}" required></label><label class="field">Стартовая скорость, %<input type="number" name="rate" min="1" max="100" value="{{.Settings.ExpectedRatePercent}}" required></label><label class="field">Интервал поиска, сек<input type="number" name="interval" min="15" max="86400" value="{{.Settings.DiscoverySeconds}}" required></label></div>
 <small>Запас добавляется к прогнозу длительности группы. Стартовая скорость используется, пока нет замеров. Интервал задаёт частоту поиска кампаний.</small><button>Сохранить расписание</button>
 </form>
 </section>

@@ -17,11 +17,12 @@ import (
 )
 
 type minerCommand struct {
-	Config   *config.Config
-	Accounts []*parser.Account
-	Remove   []string
-	Deadline time.Time
-	Streams  []twitch.Stream
+	UpdateStreams bool
+	Config        *config.Config
+	Accounts      []*parser.Account
+	Remove        []string
+	Deadline      time.Time
+	Streams       []twitch.Stream
 }
 
 type minerEvent struct {
@@ -130,7 +131,7 @@ func RunMiner(ctx context.Context, input io.Reader, output io.Writer) error {
 		case <-ctx.Done():
 			return nil
 		case command := <-commands:
-			if len(command.Remove) > 0 {
+			if len(command.Remove) > 0 || command.UpdateStreams {
 				continue
 			}
 			if command.Config == nil || len(command.Accounts) == 0 || command.Deadline.IsZero() {
@@ -183,6 +184,12 @@ func runMinerGroup(ctx context.Context, enc *json.Encoder, commands <-chan miner
 				return err
 			}
 		case next := <-commands:
+			if next.UpdateStreams {
+				if len(next.Streams) > 0 {
+					manager.SetCampaignStreams(next.Streams)
+				}
+				continue
+			}
 			if len(next.Remove) == 0 {
 				return errors.New("expected account removal during group")
 			}

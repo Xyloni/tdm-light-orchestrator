@@ -106,6 +106,10 @@ func (w *accountWorker) beaconLoop(ctx context.Context, streams *watchStream, in
 			}
 		}
 		started := time.Now()
+		if !w.m.allowsStream(stream) {
+			next = started.Add(interval)
+			continue
+		}
 		requestCtx, stop := context.WithTimeout(streamCtx, budget)
 		err := w.gql.SendMinuteWatched(requestCtx, stream)
 		stop()
