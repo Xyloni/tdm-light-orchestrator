@@ -99,24 +99,24 @@ func Test1000WorkersRecoverFromSharedHLSOutage(t *testing.T) {
 		wg.Add(1)
 		go func(i int, w *accountWorker) {
 			defer wg.Done()
-			err := w.farmDropScheduled(ctx, rand.New(rand.NewSource(int64(i))), twitch.Drop{ID: "drop", Required: 60}, watchIntervals{hls: 20 * time.Millisecond, beacon: 40 * time.Millisecond, progress: 40 * time.Millisecond, timeouts: operationTimeouts{hls: 15 * time.Second, recovery: 15 * time.Second}})
+			err := w.farmDropScheduled(ctx, rand.New(rand.NewSource(int64(i))), twitch.Drop{ID: "drop", Required: 60}, watchIntervals{hls: 100 * time.Millisecond, beacon: 200 * time.Millisecond, progress: 200 * time.Millisecond, timeouts: operationTimeouts{hls: 15 * time.Second, recovery: 15 * time.Second}})
 			if err != nil {
 				t.Error(err)
 			}
 		}(i, w)
 	}
-	wait := func(timeout time.Duration, check func() bool) {
+	wait := func(phase string, timeout time.Duration, check func() bool) {
 		t.Helper()
 		deadline := time.Now().Add(timeout)
 		for !check() {
 			if time.Now().After(deadline) {
-				t.Fatal("timed out waiting for test phase")
+				t.Fatalf("timed out waiting for %s", phase)
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
 	}
 	// Startup schedules all 1000 accounts and instruments each request under -race.
-	wait(30*time.Second, func() bool {
+	wait("initial playback", 30*time.Second, func() bool {
 		for i := range probes {
 			if probes[i].calls[0].Load() < 2 {
 				return false
@@ -130,7 +130,7 @@ func Test1000WorkersRecoverFromSharedHLSOutage(t *testing.T) {
 		m.hlsRetries.failed(time.Now())
 	}
 	phase.Store(1)
-	wait(10*time.Second, func() bool {
+	wait("outage detection and retry admission", 10*time.Second, func() bool {
 		for i := range failed {
 			if !failed[i].Load() {
 				return false
@@ -142,7 +142,7 @@ func Test1000WorkersRecoverFromSharedHLSOutage(t *testing.T) {
 	for i := range probes {
 		background[i] = [2]int32{probes[i].calls[1].Load(), probes[i].calls[2].Load()}
 	}
-	wait(10*time.Second, func() bool {
+	wait("beacon and Inventory activity during the outage", 10*time.Second, func() bool {
 		for i := range probes {
 			if probes[i].calls[1].Load() <= background[i][0] || probes[i].calls[2].Load() <= background[i][1] {
 				return false
@@ -156,7 +156,7 @@ func Test1000WorkersRecoverFromSharedHLSOutage(t *testing.T) {
 		before[i] = probes[i].calls[0].Load()
 	}
 	close(resume)
-	wait(10*time.Second, func() bool {
+	wait("playback recovery on all accounts", 30*time.Second, func() bool {
 		for i := range probes {
 			if probes[i].calls[0].Load() < before[i]+2 {
 				return false
