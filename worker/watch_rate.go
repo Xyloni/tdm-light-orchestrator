@@ -27,28 +27,31 @@ type rateSnapshot struct {
 	ready   bool
 }
 
-func (r *watchRate) snapshot() rateSnapshot {
+func (r *watchRate) snapshot(window, maxWindow time.Duration) rateSnapshot {
 	snapshot := rateSnapshot{}
 	if len(r.samples) >= 4 {
 		first, last := r.samples[0], r.samples[len(r.samples)-1]
 		elapsed := last.at.Sub(first.at)
-		if elapsed >= rateWindow && elapsed <= rateMaxWindow {
+		if elapsed >= window && elapsed <= maxWindow {
 			snapshot = rateSnapshot{gain: last.minutes - first.minutes, elapsed: elapsed, started: first.at, checked: last.at, ready: true}
 		}
 	}
 	return snapshot
 }
 
-func (s *AccountState) setWatchRate(r *watchRate) {
-	snapshot := r.snapshot()
+func (s *AccountState) setWatchRates(short, long *watchRate) {
+	shortSnapshot := short.snapshot(rateWindow, rateMaxWindow)
+	longSnapshot := long.snapshot(sustainedRateWindow, sustainedRateMaxWindow)
 	s.mu.Lock()
-	s.rateSnapshot = snapshot
+	s.rateSnapshot = shortSnapshot
+	s.longRateSnapshot = longSnapshot
 	s.mu.Unlock()
 }
 
 func (s *AccountState) clearWatchRate() {
 	s.mu.Lock()
 	s.rateSnapshot = rateSnapshot{}
+	s.longRateSnapshot = rateSnapshot{}
 	s.mu.Unlock()
 }
 

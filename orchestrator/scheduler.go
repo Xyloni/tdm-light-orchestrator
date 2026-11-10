@@ -34,6 +34,7 @@ type activeGame struct {
 }
 
 type scheduler struct {
+	resources        resourceMonitor
 	airtimes         map[string]*campaignAirtime
 	airtimeChecks    int
 	statsDirty       bool

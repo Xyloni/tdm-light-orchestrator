@@ -96,7 +96,7 @@ code { color: #e5c8ff }
 </head>
 <body><main>
 <header class="masthead"><div><span class="eyebrow">TDM LIGHT / CONTROL</span><h1>Оркестратор TDM Light</h1><p>Кампании Twitch Drops, аккаунты и управление майнерами</p></div><a class="link refresh" href="/">Обновить статус</a></header>
-<nav aria-label="Разделы панели"><a href="#games">Игры</a><a href="#accounts">Аккаунты</a><a href="#settings">Настройки</a><a href="#bots">Бот управления</a><a href="#notifications">Уведомления</a><a href="#help">Справка</a></nav>
+<nav aria-label="Разделы панели"><a href="#games">Игры</a><a href="#accounts">Аккаунты</a><a href="#settings">Настройки</a><a href="#bots">Бот управления</a><a href="#notifications">Уведомления</a><a href="#system-load">Нагрузка</a><a href="#help">Справка</a></nav>
 {{if .Message}}<p class="notice" role="status">{{.Message}}</p>{{end}}
 {{with .CampaignExport}}<form class="card stack" method="post">
 <strong>Выгрузка по кампаниям · {{.Name}}</strong>
@@ -117,7 +117,7 @@ code { color: #e5c8ff }
 <div class="stats">
 <div class="card stat"><span class="muted">Игры в работе</span><strong>{{.ActiveGames}} / {{.Settings.MaxGames}}</strong></div>
 <div class="card stat"><span class="muted">Аккаунты в работе</span><strong>{{.ActiveAccounts}} / {{.Settings.MaxAccounts}}</strong></div>
-<div class="card stat"><span class="muted">Отстают из проверенных</span><strong>{{len .Lagging.Slow}} / {{.Lagging.Measured}}</strong><a class="mode-link" href="#lagging">Подробнее</a></div>
+<div class="card stat"><span class="muted">Ниже нормы за 10–15 мин</span><strong>{{.Lagging.ShortLow}} / {{.Lagging.Measured}}</strong><a class="mode-link" href="#lagging">Подробнее</a></div>
 <div class="card stat"><span class="muted">Свободный пул</span><strong>{{.FreeAccounts}}</strong></div>
 <div class="card stat"><span class="muted">Режим группировки</span><strong>{{if .Settings.SaveResources}}Экономия{{else}}Скорость{{end}}</strong><a class="mode-link" href="#settings">Для следующих групп</a></div>
 </div>
@@ -302,7 +302,8 @@ code { color: #e5c8ff }
 <form class="stack" method="post"><input type="hidden" name="csrf" value="{{.Token}}"><input type="hidden" name="action" value="simulate">
 <label class="field">Сценарий<input name="scenario" value="1 20 | 30 30 90 | 20 45 120" maxlength="200" required></label>
 <button class="secondary">Прогнать тестовый сценарий</button></form></section>
-<details class="card report" id="lagging"><summary>Отстающие аккаунты</summary><pre>{{.LaggingText}}</pre></details>
+<section class="card report" id="system-load"><h2>Нагрузка VPS и контейнера</h2><pre>{{.ResourceText}}</pre></section>
+<details class="card report" id="lagging"><summary>Темп начисления</summary><pre>{{.LaggingText}}</pre></details>
 <section class="card help" id="help">
 <p class="section-label">Справочник</p><h2>Команды и примеры</h2>
 <p class="muted">В Telegram открой <code>/menu</code>. В Discord выбери отдельную команду, например <code>/pause_game</code> или <code>/notifications</code>. Подробности доступны через <code>/help</code>.</p>

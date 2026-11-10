@@ -11,34 +11,23 @@ import (
 )
 
 type slowAccount struct {
-	Game, Login string
-	Rate        float64
-	Recovery    worker.ManagedRecovery
+	Game, Login              string
+	Rate, LongRate           float64
+	RateKnown, LongRateKnown bool
+	Recovery                 worker.ManagedRecovery
 }
 
 type laggingReport struct {
-	Measured, Gathering int
-	Slow                []slowAccount
-	Recoveries          []slowAccount
-	Attempts            int
+	Measured, Gathering         int
+	LongMeasured, LongGathering int
+	ShortLow, LongLow, BothLow  int
+	Details                     []slowAccount
+	Attempts                    int
 }
 
-func (r laggingReport) Share() float64 {
-	if r.Measured == 0 {
-		return 0
-	}
-	return float64(len(r.Slow)) * 100 / float64(r.Measured)
-}
-
-func (r laggingReport) AverageDeficit() float64 {
-	if len(r.Slow) == 0 {
-		return 0
-	}
-	total := 0.0
-	for _, account := range r.Slow {
-		total += (1 - account.Rate) * 100
-	}
-	return total / float64(len(r.Slow))
+func freshRate(known bool, rate float64, checked, now time.Time, maxAge time.Duration) bool {
+	age := now.Sub(checked)
+	return known && !checked.IsZero() && age >= 0 && age <= maxAge && !math.IsNaN(rate) && !math.IsInf(rate, 0)
 }
 
 func (s *scheduler) laggingReport(key string, now time.Time) laggingReport {
@@ -57,41 +46,51 @@ func (s *scheduler) laggingReport(key string, now time.Time) laggingReport {
 			continue
 		}
 		report.Gathering += len(c.Group)
+		report.LongGathering += len(c.Group)
 		for _, p := range a.progress {
+			account := slowAccount{Game: g.Name, Login: p.Login, Recovery: p.Recovery}
 			if p.Recovery.Attempts > 0 {
 				report.Attempts += p.Recovery.Attempts
-				report.Recoveries = append(report.Recoveries, slowAccount{Game: g.Name, Login: p.Login, Recovery: p.Recovery})
 			}
 			if terminal(p.Status) {
 				report.Gathering--
-				continue
+				report.LongGathering--
 			}
-			age := now.Sub(p.RateChecked)
-			if !strings.HasPrefix(p.Status, "farm") || !p.RateKnown || p.RateChecked.IsZero() || age < 0 || age > maxAge || math.IsNaN(p.Rate) || math.IsInf(p.Rate, 0) {
-				continue
+			if strings.HasPrefix(p.Status, "farm") {
+				account.RateKnown = freshRate(p.RateKnown, p.Rate, p.RateChecked, now, maxAge)
+				account.LongRateKnown = freshRate(p.LongRateKnown, p.LongRate, p.LongRateChecked, now, maxAge)
+				account.Rate, account.LongRate = max(0, p.Rate), max(0, p.LongRate)
 			}
-			report.Gathering--
-			report.Measured++
-			if p.Rate < worker.NormalWatchRate {
-				report.Slow = append(report.Slow, slowAccount{Game: g.Name, Login: p.Login, Rate: max(0, p.Rate), Recovery: p.Recovery})
+			shortLow := account.RateKnown && account.Rate < worker.NormalWatchRate
+			longLow := account.LongRateKnown && account.LongRate < worker.NormalWatchRate
+			if account.RateKnown {
+				report.Gathering--
+				report.Measured++
+			}
+			if account.LongRateKnown {
+				report.LongGathering--
+				report.LongMeasured++
+			}
+			if shortLow {
+				report.ShortLow++
+			}
+			if longLow {
+				report.LongLow++
+			}
+			if shortLow && longLow {
+				report.BothLow++
+			}
+			if shortLow || longLow || p.Recovery.Attempts > 0 {
+				report.Details = append(report.Details, account)
 			}
 		}
 	}
 	report.Gathering = max(0, report.Gathering)
-	sort.Slice(report.Slow, func(i, j int) bool {
-		a, b := report.Slow[i], report.Slow[j]
-		if a.Rate != b.Rate {
-			return a.Rate < b.Rate
-		}
-		if a.Game != b.Game {
-			return a.Game < b.Game
-		}
-		return a.Login < b.Login
-	})
-	sort.SliceStable(report.Recoveries, func(i, j int) bool {
-		a, b := report.Recoveries[i], report.Recoveries[j]
-		if !a.Recovery.At.Equal(b.Recovery.At) {
-			return a.Recovery.At.After(b.Recovery.At)
+	report.LongGathering = max(0, report.LongGathering)
+	sort.Slice(report.Details, func(i, j int) bool {
+		a, b := report.Details[i], report.Details[j]
+		if a.lowWindows() != b.lowWindows() {
+			return a.lowWindows() > b.lowWindows()
 		}
 		if a.Game != b.Game {
 			return a.Game < b.Game
@@ -118,42 +117,72 @@ func recoveryText(recovery worker.ManagedRecovery) string {
 	return fmt.Sprintf("попыток: %d · %s", recovery.Attempts, status)
 }
 
-func (r laggingReport) text() string {
-	var out strings.Builder
-	fmt.Fprintf(&out, "Проверено: %d · ждём замеры: %d\nОтстают: %d", r.Measured, r.Gathering, len(r.Slow))
-	if r.Measured > 0 {
-		fmt.Fprintf(&out, " (%.1f%% от проверенных)", r.Share())
+func (a slowAccount) lowWindows() int {
+	count := 0
+	if a.RateKnown && a.Rate < worker.NormalWatchRate {
+		count++
 	}
-	listed := make(map[[2]string]bool)
-	if len(r.Slow) > 0 {
-		fmt.Fprintf(&out, "\nСреднее отставание: %.1f%%\n\nСамые медленные:", r.AverageDeficit())
-		for _, a := range r.Slow[:min(10, len(r.Slow))] {
-			fmt.Fprintf(&out, "\n• %s · %s: темп %.1f%%, отставание %.1f%%", brief(a.Game, 40), a.Login, a.Rate*100, (1-a.Rate)*100)
-			if a.Recovery.Attempts > 0 {
-				fmt.Fprintf(&out, "\n  ↳ %s", recoveryText(a.Recovery))
-				listed[[2]string{a.Game, a.Login}] = true
-			}
-		}
-		if len(r.Slow) > 10 {
-			fmt.Fprintf(&out, "\nЕщё отстающих: %d.", len(r.Slow)-10)
-		}
-	} else if r.Measured == 0 {
-		fmt.Fprint(&out, "\nОценка появится после первого полного окна наблюдения.")
+	if a.LongRateKnown && a.LongRate < worker.NormalWatchRate {
+		count++
+	}
+	return count
+}
+
+func (r laggingReport) text() string {
+	if r.Measured+r.Gathering+r.LongMeasured+r.LongGathering == 0 {
+		return "Сейчас нет активных аккаунтов для замера."
+	}
+	var out strings.Builder
+	fmt.Fprint(&out, "⏱ Последние 10–15 минут\n")
+	writeRateWindow(&out, r.Measured, r.Gathering, r.ShortLow)
+	fmt.Fprint(&out, "\n\n🕒 Последние 30–35 минут\n")
+	writeRateWindow(&out, r.LongMeasured, r.LongGathering, r.LongLow)
+	if r.LongMeasured > 0 && r.Measured > 0 {
+		fmt.Fprintf(&out, "\n\nНиже нормы в обоих окнах: %d", r.BothLow)
 	}
 	if r.Attempts > 0 {
-		fmt.Fprintf(&out, "\n\nВосстановление скорости: %d попыток в текущих группах.", r.Attempts)
-		shown := 0
-		for _, a := range r.Recoveries {
-			if listed[[2]string{a.Game, a.Login}] {
-				continue
-			}
-			if shown == 5 {
-				break
-			}
-			fmt.Fprintf(&out, "\n• %s · %s: %s", brief(a.Game, 32), a.Login, recoveryText(a.Recovery))
-			shown++
-		}
+		fmt.Fprintf(&out, "\nПопытки восстановления: %d", r.Attempts)
 	}
-	fmt.Fprint(&out, "\n\n100% = 1 минута Twitch за минуту просмотра. Отстают при темпе ниже 90%. Окно замера: 10–15 минут.")
+	fmt.Fprint(&out, "\n\nℹ️ Норма — от 90%. Короткое окно показывает недавние колебания, длинное сглаживает их.")
 	return out.String()
+}
+
+func writeRateWindow(out *strings.Builder, measured, gathering, low int) {
+	if measured == 0 {
+		fmt.Fprintf(out, "Ждём первый замер: %d акк.", gathering)
+		return
+	}
+	fmt.Fprintf(out, "В норме: %d из %d с замером\nНиже нормы: %d", measured-low, measured, low)
+	if gathering > 0 {
+		fmt.Fprintf(out, "\nЖдём замер: %d акк.", gathering)
+	}
+}
+
+func rateLabel(known bool, rate float64) string {
+	if !known {
+		return "ждём замер"
+	}
+	label := fmt.Sprintf("%.1f%%", rate*100)
+	if rate < worker.NormalWatchRate && label == "90.0%" {
+		return "чуть ниже 90%"
+	}
+	return label
+}
+
+func (r laggingReport) details(limit int) string {
+	if len(r.Details) == 0 {
+		return "По текущим замерам аккаунтов с пониженным темпом нет. Здесь также появятся результаты восстановления."
+	}
+	var out strings.Builder
+	for _, a := range r.Details[:min(limit, len(r.Details))] {
+		fmt.Fprintf(&out, "• %s · %s\n  10–15 мин: %s · 30–35 мин: %s\n", brief(a.Game, 40), a.Login, rateLabel(a.RateKnown, a.Rate), rateLabel(a.LongRateKnown, a.LongRate))
+		if a.Recovery.Attempts > 0 {
+			fmt.Fprintf(&out, "  ↳ %s\n", recoveryText(a.Recovery))
+		}
+		out.WriteByte('\n')
+	}
+	if len(r.Details) > limit {
+		fmt.Fprintf(&out, "Ещё аккаунтов: %d", len(r.Details)-limit)
+	}
+	return strings.TrimSpace(out.String())
 }

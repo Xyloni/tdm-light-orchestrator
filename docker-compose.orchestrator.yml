@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
+      ORCHESTRATOR_CONTAINER_METRICS: "1"
       ORCHESTRATOR_DIR: /data/orchestrator
       ORCHESTRATOR_WEB_ADDR: 127.0.0.1:8787
     volumes:

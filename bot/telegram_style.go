@@ -14,8 +14,12 @@ func telegramPanelTitle(action string) string {
 		return "🎮 TDM Light"
 	case kind == "status":
 		return "📡 Состояние оркестратора"
+	case kind == "system-load":
+		return "🖥 Нагрузка"
 	case kind == "lagging" || kind == "game-lagging":
-		return "🐢 Отстающие аккаунты"
+		return "📊 Темп начисления"
+	case kind == "lagging-details" || kind == "game-lagging-details":
+		return "👥 Темп по аккаунтам"
 	case kind == "stats" || kind == "game-stats":
 		return "📊 Статистика фарма"
 	case kind == "games" || kind == "find-choice":
@@ -120,7 +124,9 @@ func telegramSectionHeading(line string) bool {
 	case "📊 Загрузка", "⚙️ Настройки фарма", "🟣 Связь с Twitch", "📡 Фарм сейчас",
 		"📊 Нагрузка плана", "📡 Текущее состояние", "⚙️ Текущие настройки", "🎛 Параметры майнеров",
 		"📥 Свободный пул", "🔔 Доставка", "🕘 Суточная сводка", "📅 Дата архива", "📦 Содержимое ZIP",
-		"📅 Сегодня", "🗓 Последние 7 дней", "🏁 За всё время":
+		"📅 Сегодня", "🗓 Последние 7 дней", "🏁 За всё время",
+		"🖥 VPS целиком", "📦 Контейнер оркестратора",
+		"⏱ Последние 10–15 минут", "🕒 Последние 30–35 минут":
 		return true
 	}
 	return false
@@ -134,7 +140,9 @@ func telegramMetricLabel(label string) bool {
 		"Последний успешный опрос Twitch", "Активная группа", "В очереди", "Отстают", "Проверено",
 		"Среднее отставание", "Подтверждённых эфиров кампании", "Игра", "Игр в списке", "Следующая группа", "Первая группа",
 		"Аккаунты в пуле", "Завершили", "Готово к получению", "Получено", "Статус получения неизвестен",
-		"Выбрано кампаний", "Условие", "Подходят":
+		"Выбрано кампаний", "Условие", "Подходят", "В норме", "Ниже нормы",
+		"CPU", "RAM", "Диск с данными", "Средняя нагрузка за 15 мин",
+		"Ниже нормы в обоих окнах", "Попытки восстановления":
 		return true
 	}
 	return false
@@ -198,7 +206,7 @@ func telegramButton(action, label string) string {
 			"accounts": "👥", "game-pool": "👥", "game-options": "⚙️", "assign": "📌", "free": "📤", "target": "🎯", "upload": "📎",
 			"settings": "⚙️", "miner-options": "⚙️", "policy": "⚙️", "notifications": "🔔", "digest": "🕘",
 			"help": "📖", "menu": "🏠", "resume": "▶️", "stop": "⏸️", "restart": "🔄", "report": "📋",
-			"lagging": "🐢", "game-lagging": "🐢", "quarantine": "🛡️", "game-quarantine": "🛡️", "speed": "🔁", "resources": "🔁", "limits": "🎚️",
+			"system-load": "🖥", "lagging": "📊", "game-lagging": "📊", "lagging-details": "👥", "game-lagging-details": "👥", "quarantine": "🛡️", "game-quarantine": "🛡️", "speed": "🔁", "resources": "🔁", "limits": "🎚️",
 			"timing": "🗓️", "simulate": "🧪", "trim": "⚡", "find": "🔎", "add": "➕", "exclude": "🚫", "include": "🎁",
 		}[kind]
 		if kind == "notify" {

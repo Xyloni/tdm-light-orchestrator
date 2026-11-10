@@ -38,7 +38,7 @@ func TestStatusUsesOnlyFreshActiveRateWindows(t *testing.T) {
 		for i := 1; i <= 5; i++ {
 			rate.observe(end.Add(time.Duration(i*2-10)*time.Minute), tc.gain*i/5, true, 5*time.Minute)
 		}
-		st.setWatchRate(&rate)
+		st.setWatchRates(&rate, &watchRate{})
 		m.states[tc.login] = st
 	}
 	m.states["warming"] = &AccountState{Status: "farm: campaign"}
@@ -84,11 +84,42 @@ func TestStatusConcurrentRateUpdates(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 100; j++ {
-				st.setWatchRate(&r)
+				st.setWatchRates(&r, &watchRate{})
 				_ = m.statusTextAt(now)
 				st.clearWatchRate()
 			}
 		}()
 	}
 	wg.Wait()
+}
+
+func TestManagedSnapshotPublishesSeparateRateWindows(t *testing.T) {
+	start := time.Now()
+	m := statusTestManager(start)
+	st := &AccountState{Status: "farm", Account: &parser.Account{Login: "viewer"}}
+	m.states["viewer"] = st
+	var short, long watchRate
+	for i := 0; i <= 15; i++ {
+		at := start.Add(time.Duration(2*i) * time.Minute)
+		minutes := i + max(0, i-10)
+		short.observe(at, minutes, true, 5*time.Minute)
+		long.observeWindow(at, minutes, true, 5*time.Minute, sustainedRateWindow, sustainedRateMaxWindow, NormalWatchRate)
+		if i == 5 {
+			st.setWatchRates(&short, &long)
+			p := m.ManagedSnapshot()[0]
+			if !p.RateKnown || p.LongRateKnown {
+				t.Fatalf("expected only a short measurement, got %+v", p)
+			}
+		}
+	}
+	st.setWatchRates(&short, &long)
+	p := m.ManagedSnapshot()[0]
+	if !p.RateKnown || p.Rate != 1 || !p.LongRateKnown || p.LongRate != 20.0/30 || !p.LongRateChecked.Equal(start.Add(30*time.Minute)) {
+		t.Fatalf("unexpected rate measurements: %+v", p)
+	}
+	st.clearWatchRate()
+	p = m.ManagedSnapshot()[0]
+	if p.RateKnown || p.LongRateKnown {
+		t.Fatalf("rate measurements survived a reset: %+v", p)
+	}
 }

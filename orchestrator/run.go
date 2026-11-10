@@ -67,6 +67,11 @@ func Run(ctx context.Context, dir, address string) error {
 		}
 	}
 	prune()
+	s.mu.Lock()
+	s.sampleResources(dir, time.Now())
+	s.mu.Unlock()
+	resources := time.NewTicker(resourceInterval)
+	defer resources.Stop()
 	digest := time.NewTicker(time.Minute)
 	defer digest.Stop()
 	retention := time.NewTicker(time.Hour)
@@ -91,6 +96,10 @@ func Run(ctx context.Context, dir, address string) error {
 		case now := <-digest.C:
 			s.mu.Lock()
 			s.sendDailyDigest(now)
+			s.mu.Unlock()
+		case now := <-resources.C:
+			s.mu.Lock()
+			s.sampleResources(dir, now)
 			s.mu.Unlock()
 		case <-retention.C:
 			prune()

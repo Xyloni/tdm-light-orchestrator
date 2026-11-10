@@ -45,7 +45,7 @@ func (s *AccountState) observeRateRecovery(dropID string, finished bool, r *watc
 	}
 	snapshot := s.rateSnapshot
 	if r != nil {
-		snapshot = r.snapshot()
+		snapshot = r.snapshot(rateWindow, rateMaxWindow)
 	}
 	if snapshot.ready && !snapshot.started.Before(recovery.ended) {
 		recovery.Rate = float64(snapshot.gain) / snapshot.elapsed.Minutes()

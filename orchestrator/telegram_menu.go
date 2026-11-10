@@ -58,16 +58,16 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		report := s.laggingReport("", time.Now())
 		panel.Text = fmt.Sprintf("TWITCH DROPS  /  ЦЕНТР УПРАВЛЕНИЯ\n\n📡 Фарм сейчас\n🎮 Игры: %d / %d   ·   👥 Аккаунты: %d / %d", len(s.active), s.state.Settings.MaxGames, s.runningAccounts(), s.state.Settings.MaxAccounts)
 		if report.Measured > 0 {
-			panel.Text += fmt.Sprintf("\n🐢 Отстают: %d из %d проверенных", len(report.Slow), report.Measured)
+			panel.Text += fmt.Sprintf("\n⏱ Темп в норме: %d из %d с замером", report.Measured-report.ShortLow, report.Measured)
 		} else {
 			panel.Text += "\n⏱ Замеры темпа: пока нет данных"
 		}
 		s.mu.Unlock()
 		panel.Text += "\n\nВыберите раздел управления ↓"
-		row(button("Статус фарма", "status"), button("Отстающие", "lagging"))
+		row(button("Статус фарма", "status"), button("Темп начисления", "lagging"))
 		row(button("Игры", "games"), button("Аккаунты", "accounts"))
 		row(button("Статистика", "stats"), button("Уведомления", "notifications"))
-		row(button("📁 Скачать логи", "logs"))
+		row(button("Нагрузка", "system-load"), button("📁 Скачать логи", "logs"))
 		row(button("Настройки", "settings"), button("Справка", "help"))
 		return panel
 	case "quarantine":
@@ -146,12 +146,23 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		panel.Text = s.telegramStats("", time.Now())
 		s.mu.Unlock()
 		row(button("Обновить", "stats"), button("Статус фарма", "status"))
+	case "system-load":
+		panel.Text = s.command("system-load")
+		row(button("Обновить", "system-load"), button("Уведомления", "notifications"))
 	case "lagging":
-		panel.Text = s.command("lagging")
+		s.mu.Lock()
+		panel.Text = s.laggingReport("", time.Now()).text()
+		s.mu.Unlock()
+		row(button("По аккаунтам", "lagging-details"))
 		row(button("Обновить", "lagging"), button("Статус фарма", "status"))
+	case "lagging-details":
+		s.mu.Lock()
+		panel.Text = s.laggingReport("", time.Now()).details(10)
+		s.mu.Unlock()
+		row(button("Обновить", action), button("К сводке", "lagging"))
 	case "status":
 		panel.Text = s.telegramStatus(time.Now())
-		row(button("Обновить", "status"), button("Отстающие", "lagging"))
+		row(button("Обновить", "status"), button("Темп начисления", "lagging"))
 		row(button("Игры", "games"), button("Статистика", "stats"))
 	case "settings", "speed", "resources", "trim", "trim-confirm":
 		if input, text, ok := strings.Cut(action, "\n"); ok {
@@ -239,7 +250,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 			if (page+1)*8 < len(keys) {
 				row(button("Следующие", fmt.Sprintf("games:%d", page+1)))
 			}
-		case "game", "game-pool", "game-options", "stop", "resume", "restart", "regroup", "regroup-confirm", "remove", "remove-release-confirm", "remove-delete-confirm", "clear-game", "clear-release-confirm", "clear-delete-confirm", "report", "game-quarantine", "game-stats", "game-lagging", "game-preview", "game-preview-speed", "game-preview-resources":
+		case "game", "game-pool", "game-options", "stop", "resume", "restart", "regroup", "regroup-confirm", "remove", "remove-release-confirm", "remove-delete-confirm", "clear-game", "clear-release-confirm", "clear-delete-confirm", "report", "game-quarantine", "game-stats", "game-lagging", "game-lagging-details", "game-preview", "game-preview-speed", "game-preview-resources":
 			panel.Text = "Игра больше не найдена."
 			for key, g := range s.state.Games {
 				if gameRef(key) != value {
@@ -283,9 +294,15 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 					row(button("К игре", "game:"+value))
 					return panel
 				case "game-lagging":
-					panel.Title = "🐢 Отстающие · " + g.Name
+					panel.Title = "📊 Темп начисления · " + g.Name
+					row(button("По аккаунтам", "game-lagging-details:"+value))
 					panel.Text = s.laggingReport(key, time.Now()).text()
 					row(button("Обновить", action), button("К игре", "game:"+value))
+					return panel
+				case "game-lagging-details":
+					panel.Title = "👥 Темп по аккаунтам · " + g.Name
+					panel.Text = s.laggingReport(key, time.Now()).details(10)
+					row(button("Обновить", action), button("К сводке", "game-lagging:"+value))
 					return panel
 				case "game-stats":
 					panel.Title = "📊 Статистика · " + g.Name
@@ -342,7 +359,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 					row(button("Пул аккаунтов", "game-pool:"+value), button("Настройки игры", "game-options:"+value))
 					row(button("Статистика", "game-stats:"+value), button("История кампаний", "report:"+value))
 					row(button("🏆 Кампании в пуле", "cov:"+value))
-					row(button("Предпросмотр", "game-preview:"+value), button("Отстающие", "game-lagging:"+value))
+					row(button("Предпросмотр", "game-preview:"+value), button("Темп начисления", "game-lagging:"+value))
 					if c := g.Campaigns[g.Current]; c != nil && c.Finished == "" && len(c.Group) > 0 {
 						if !g.Paused && s.active[key] != nil && !s.active[key].stopping {
 							row(button("Обновить", "game:"+value))

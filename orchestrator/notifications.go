@@ -23,6 +23,7 @@ var noticeKinds = []noticeKind{
 	{"stalled", "Минуты не начисляются у большинства группы", false},
 	{"auth", "Ошибки авторизации и карантин", true},
 	{"reward", "Готовность отдельных наград", false},
+	{"resources", "Длительная высокая нагрузка CPU или RAM на VPS", false},
 }
 
 func (s *scheduler) noticeEnabled(kind string) bool {

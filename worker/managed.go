@@ -49,6 +49,9 @@ type ManagedProgress struct {
 	Rate                  float64
 	RateKnown             bool
 	RateChecked           time.Time
+	LongRate              float64
+	LongRateKnown         bool
+	LongRateChecked       time.Time
 	Recovery              ManagedRecovery
 }
 
@@ -106,6 +109,11 @@ func (m *Manager) ManagedSnapshot() []ManagedProgress {
 			p.RateKnown = true
 			p.RateChecked = s.rateSnapshot.checked
 			p.Rate = float64(s.rateSnapshot.gain) / s.rateSnapshot.elapsed.Minutes()
+		}
+		if s.longRateSnapshot.ready {
+			p.LongRateKnown = true
+			p.LongRateChecked = s.longRateSnapshot.checked
+			p.LongRate = float64(s.longRateSnapshot.gain) / s.longRateSnapshot.elapsed.Minutes()
 		}
 		for _, reward := range s.rewardProgress {
 			p.RewardProgress = append(p.RewardProgress, reward)

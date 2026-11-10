@@ -24,7 +24,8 @@ func (b *Bot) registerOrchestratorMenu(ctx context.Context) {
 	commands := []map[string]string{
 		{"command": "menu", "description": "Панель управления с кнопками"},
 		{"command": "status", "description": "Активные кампании и состояние Twitch"},
-		{"command": "lagging", "description": "Отстающие аккаунты и скорость начисления"},
+		{"command": "lagging", "description": "Темп начисления за 10–15 и 30–35 минут"},
+		{"command": "system_load", "description": "Нагрузка VPS и контейнера"},
 		{"command": "stats", "description": "Статистика за сегодня, неделю и всё время"},
 		{"command": "download_logs", "description": "Скачать архив дневных логов"},
 		{"command": "games", "description": "Игры, пауза и перезапуск"},
@@ -84,6 +85,8 @@ func (b *Bot) handleOrchestratorText(ctx context.Context, cmd, args, text string
 		action = "logs:" + args
 	case cmd == "/help":
 		action = "help:" + args
+	case cmd == "/system_load":
+		action = "system-load"
 	case args == "" && (cmd == "/notifications" || cmd == "/lagging" || cmd == "/stats"):
 		action = strings.TrimPrefix(cmd, "/")
 	default:

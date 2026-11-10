@@ -42,6 +42,7 @@ type panelData struct {
 	CampaignExport                            *webCampaignExport
 	Lagging                                   laggingReport
 	LaggingText                               string
+	ResourceText                              string
 	DigestAt                                  string
 	Lifetime                                  totals
 	StatsText                                 string
@@ -119,9 +120,13 @@ func (s *scheduler) panel(token, message string, showConfirm bool) panelData {
 	for _, item := range noticeKinds {
 		view.Notifications = append(view.Notifications, notificationView{item.Key, item.Label, s.noticeConfigured(item.Key)})
 	}
+	view.ResourceText = s.resourceText()
 	view.DigestAt = s.state.Digest.At
 	view.Lagging = s.laggingReport("", time.Now())
 	view.LaggingText = view.Lagging.text()
+	if len(view.Lagging.Details) > 0 {
+		view.LaggingText += "\n\n" + view.Lagging.details(10)
+	}
 	view.Lifetime = s.state.Stats.sum("", "")
 	view.StatsText = s.statsText("", time.Now())
 	view.Quarantine = s.quarantineSummary("")

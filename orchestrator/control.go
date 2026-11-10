@@ -34,12 +34,18 @@ func (s *scheduler) operate(action, rest string) string {
 		return s.setDigest(rest)
 	case "stats":
 		return s.statsText(rest, time.Now())
+	case "system-load":
+		return s.resourceText()
 	case "lagging":
 		key := strings.ToLower(rest)
 		if key != "" && s.state.Games[key] == nil {
 			return "Игра не найдена."
 		}
-		return s.laggingReport(key, time.Now()).text()
+		report := s.laggingReport(key, time.Now())
+		if len(report.Details) == 0 {
+			return report.text()
+		}
+		return report.text() + "\n\n" + report.details(6)
 	case "status":
 		return s.status()
 	case "errors":

@@ -43,6 +43,7 @@ type AccountState struct {
 	ProgressKnown         bool
 	ProgressChecked       time.Time
 	rateSnapshot          rateSnapshot
+	longRateSnapshot      rateSnapshot
 	rateRecoveries        int
 	recoveryStatus        rateRecoveryStatus
 }

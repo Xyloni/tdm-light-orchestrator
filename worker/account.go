@@ -223,8 +223,10 @@ func (w *accountWorker) farmDropScheduled(parent context.Context, rnd *rand.Rand
 	transientFailures := 0
 	hlsRetry := false
 	var retryQueuedAt time.Time
-	var overall watchRate
-	overall.reset(time.Now(), drop.Current, drop.ProgressKnown)
+	var overall, overallLong watchRate
+	started := time.Now()
+	overall.reset(started, drop.Current, drop.ProgressKnown)
+	overallLong.reset(started, drop.Current, drop.ProgressKnown)
 	var rate, sustained watchRate
 	var rateStarted time.Time
 	handleProgress := func(result inventoryResult) bool {
@@ -242,8 +244,10 @@ func (w *accountWorker) farmDropScheduled(parent context.Context, rnd *rand.Rand
 			return true
 		}
 		w.reportProgress(cur)
-		overall.observe(result.checked, cur.Current, cur.ProgressKnown, 2*intervals.progress+time.Minute)
-		w.st.setWatchRate(&overall)
+		maxGap := 2*intervals.progress + time.Minute
+		overall.observe(result.checked, cur.Current, cur.ProgressKnown, maxGap)
+		overallLong.observeWindow(result.checked, cur.Current, cur.ProgressKnown, maxGap, sustainedRateWindow, sustainedRateMaxWindow, NormalWatchRate)
+		w.st.setWatchRates(&overall, &overallLong)
 		drop = cur
 		if cur.ProgressKnown && cur.Current >= cur.Required {
 			w.st.observeRateRecovery(cur.ID, true, nil)
