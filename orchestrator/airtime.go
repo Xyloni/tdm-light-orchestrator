@@ -21,6 +21,7 @@ type campaignAirtime struct {
 	checked, total int
 	streams        []twitch.Stream
 	failed         bool
+	reason         string
 }
 
 func (a *campaignAirtime) includes(previous []twitch.Stream) bool {
@@ -46,7 +47,7 @@ func (a *campaignAirtime) status() string {
 	case len(a.streams) > 0:
 		return fmt.Sprintf("Подтверждённых эфиров кампании: %d.", len(a.streams))
 	case a.failed:
-		return "Не удалось проверить доступность эфиров кампании."
+		return "Не удалось проверить доступность эфиров кампании. " + a.reason + "."
 	case a.total > 0:
 		return fmt.Sprintf("Ожидание эфира кампании. Подходящих среди проверенных каналов: 0 из %d (в списке %d).", a.checked, a.total)
 	default:
@@ -121,6 +122,10 @@ func (s *scheduler) checkCampaignAirtime(ctx context.Context, key string, g *gam
 		air.at = time.Now()
 		air.next = air.at.Add(time.Duration(s.state.Settings.DiscoverySeconds) * time.Second)
 		air.checking, air.failed = false, err != nil
+		air.reason = ""
+		if err != nil {
+			air.reason = err.Error()
+		}
 		air.streams, air.checked, air.total = streams, checked, total
 		if len(streams) == 0 && checked > 0 && checked < total {
 			air.offset = (offset + checked) % total

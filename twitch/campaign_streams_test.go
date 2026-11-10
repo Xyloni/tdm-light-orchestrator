@@ -15,10 +15,11 @@ import (
 func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 	wantCampaign := "target"
 	offeredCampaign := "other"
+	detailsUnavailable := false
 	transport := reviewTransport(func(r *http.Request) (*http.Response, error) {
 		var request struct {
 			OperationName string
-			Variables     map[string]string
+			Variables     map[string]any
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
@@ -27,6 +28,13 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 		switch request.OperationName {
 		case "DropCampaignDetails":
 			data = `{"user":{"dropCampaign":{"allow":{"isEnabled":true,"channels":[{"name":"live"},{"name":"offline"}]}}}}`
+			if detailsUnavailable {
+				data = `{"user":{"dropCampaign":null}}`
+			}
+		case "GameSlug":
+			data = `{"game":{"slug":"game"}}`
+		case "DirectoryPage_Game":
+			data = `{"game":{"streams":{"edges":[{"node":{"id":"2","game":{"id":"3","displayName":"Game"},"broadcaster":{"id":"1","login":"live"}}}]}}}`
 		case "VideoPlayerStreamInfoOverlayChannel":
 			if request.Variables["channel"] == "offline" {
 				data = `{"user":{"stream":null}}`
@@ -49,5 +57,15 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 	streams, _, _, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
 	if err != nil || len(streams) != 1 || streams[0].Login != "live" {
 		t.Fatalf("expected the eligible live channel: %v %v", streams, err)
+	}
+	detailsUnavailable = true
+	streams, _, _, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
+	if err != nil || len(streams) != 1 || streams[0].Login != "live" {
+		t.Fatalf("expected the eligible channel from the directory: %v %v", streams, err)
+	}
+	offeredCampaign = "other"
+	streams, _, _, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
+	if err == nil || len(streams) != 0 {
+		t.Fatalf("fallback accepted a different campaign or hid missing details: %v %v", streams, err)
 	}
 }
