@@ -52,9 +52,9 @@ func (a *campaignAirtime) status() string {
 	case len(a.streams) > 0:
 		return fmt.Sprintf("Подтверждённых эфиров кампании: %d.", len(a.streams))
 	case a.failed:
-		return "Не удалось проверить доступность эфиров кампании. " + a.reason + "."
+		return "⚠️ Не удалось проверить эфиры кампании.\n" + a.reason + "."
 	case a.waitStatus != "":
-		return "Ожидание эфира кампании. " + a.waitStatus
+		return "⏳ Ожидание эфира кампании.\n" + a.waitStatus
 	case a.total > 0:
 		return fmt.Sprintf("Ожидание эфира кампании. Подходящих среди проверенных каналов: 0 из %d (в списке %d).", a.checked, a.total)
 	default:
@@ -67,7 +67,7 @@ func (a *campaignAirtime) summary() string {
 	if a == nil || a.at.IsZero() {
 		return message
 	}
-	return message + " Проверено в " + a.at.Local().Format("15:04 MST") + "."
+	return message + "\n🕒 Проверено в " + a.at.Local().Format("15:04 MST")
 }
 
 func (s *scheduler) airtimeFor(key, campaignID string) *campaignAirtime {

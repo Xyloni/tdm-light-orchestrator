@@ -34,28 +34,29 @@ type activeGame struct {
 }
 
 type scheduler struct {
-	airtimes       map[string]*campaignAirtime
-	airtimeChecks  int
-	statsDirty     bool
-	telegramSearch telegramSearchResult
-	journal        *log.Logger
-	categoryNames  []string
-	botChanges     chan struct{}
-	mu             sync.Mutex
-	path           string
-	state          *state
-	miner          config.Config
-	active         map[string]*activeGame
-	updates        chan processUpdate
-	catalogs       chan discoveryResult
-	retry          map[string]time.Time
-	lastDiscovery  time.Time
-	discovering    bool
-	discoveryError string
-	notice         string
-	notify         func(string)
-	trimPreview    []string
-	trimUntil      time.Time
+	airtimes         map[string]*campaignAirtime
+	airtimeChecks    int
+	statsDirty       bool
+	telegramSearch   telegramSearchResult
+	telegramCoverage campaignExportSelection
+	journal          *log.Logger
+	categoryNames    []string
+	botChanges       chan struct{}
+	mu               sync.Mutex
+	path             string
+	state            *state
+	miner            config.Config
+	active           map[string]*activeGame
+	updates          chan processUpdate
+	catalogs         chan discoveryResult
+	retry            map[string]time.Time
+	lastDiscovery    time.Time
+	discovering      bool
+	discoveryError   string
+	notice           string
+	notify           func(string)
+	trimPreview      []string
+	trimUntil        time.Time
 }
 
 type discoveryResult struct {
@@ -124,7 +125,7 @@ func (s *scheduler) applyCatalog(result discoveryResult, now time.Time) {
 		var rewards []rewardRequirement
 		for _, drop := range remote.TimeBasedDrops {
 			if drop.Required > 0 {
-				rewards = append(rewards, rewardRequirement{Name: drop.Name, Minutes: drop.Required})
+				rewards = append(rewards, rewardRequirement{ID: drop.ID, Name: drop.Name, Minutes: drop.Required})
 			}
 		}
 		if len(rewards) == 0 {

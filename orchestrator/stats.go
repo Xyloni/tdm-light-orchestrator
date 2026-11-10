@@ -20,8 +20,9 @@ func (t *totals) add(other totals) {
 }
 
 type rewardWatermark struct {
-	Minutes      int
-	Known, Ready bool
+	Minutes         int
+	Known, Ready    bool
+	Earned, Claimed bool
 }
 
 type statistics struct {
@@ -78,6 +79,8 @@ func (s *statistics) recordProgress(game, campaign string, items []worker.Manage
 			key := game + "\x00" + campaign + "\x00" + item.UserID + "\x00" + sample.ID
 			previous, exists := s.Progress[key]
 			next := previous
+			next.Earned = previous.Earned || sample.Earned || sample.Ready || sample.Claimed
+			next.Claimed = previous.Claimed || sample.Claimed
 			if sample.Known {
 				baseline := sample.First
 				if previous.Known {

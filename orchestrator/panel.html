@@ -98,6 +98,15 @@ code { color: #e5c8ff }
 <header class="masthead"><div><span class="eyebrow">TDM LIGHT / CONTROL</span><h1>Оркестратор TDM Light</h1><p>Кампании Twitch Drops, аккаунты и управление майнерами</p></div><a class="link refresh" href="/">Обновить статус</a></header>
 <nav aria-label="Разделы панели"><a href="#games">Игры</a><a href="#accounts">Аккаунты</a><a href="#settings">Настройки</a><a href="#bots">Бот управления</a><a href="#notifications">Уведомления</a><a href="#help">Справка</a></nav>
 {{if .Message}}<p class="notice" role="status">{{.Message}}</p>{{end}}
+{{with .CampaignExport}}<form class="card stack" method="post">
+<strong>Выгрузка по кампаниям · {{.Name}}</strong>
+<p>Подходящих аккаунтов: {{.Count}}. Файл содержит данные доступа Twitch.</p>
+<p>Условие: {{.ModeLabel}}</p><ul>{{range .Names}}<li>{{.}}</li>{{end}}</ul>
+<input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="game" value="{{.Game}}"><input type="hidden" name="mode" value="{{.Mode}}">
+{{range .IDs}}<input type="hidden" name="campaign" value="{{.}}">{{end}}
+<input type="hidden" name="fingerprint" value="{{.Fingerprint}}">
+<button name="action" value="campaign-export-confirm">Подтвердить и скачать .txt</button>
+</form>{{end}}
 <p class="notice muted">{{.CatalogStatus}}</p>
 <section aria-label="Статистика за всё время" class="stats">
 <div class="card stat"><span class="muted">Аккаунто-минуты</span><strong>{{.Lifetime.Minutes}}</strong></div>
@@ -130,6 +139,19 @@ code { color: #e5c8ff }
 <article class="game"><div class="game-head"><h3>{{.Name}}</h3><span class="tag">{{if .Removing}}Удаляется{{else if .Regroup}}Перегруппировка{{else if .Paused}}На паузе{{else if .Stopping}}Перезапускается{{else if .Active}}В работе{{else}}Ожидает{{end}}</span></div>
 <p class="muted">В пуле {{.Accounts}} из {{.Target}}{{if .Deficit}} · не хватает {{.Deficit}}{{end}}</p>
 {{if .GroupSummary}}<p class="group-summary">{{.GroupSummary}}</p>{{end}}
+<details><summary>🏆 Кампании в пуле</summary>
+{{if .Coverage}}
+{{$poolSize := .Accounts}}
+<ul>{{range .Coverage}}<li><strong>{{.Name}}</strong><br>Завершили {{.Complete}} из {{$poolSize}}{{if .Ready}} · готовы к получению {{.Ready}}{{end}}{{if .Claimed}} · получены {{.Claimed}}{{end}}{{if .Unknown}} · статус получения неизвестен у {{.Unknown}}{{end}}</li>{{end}}</ul>
+<details><summary>По наборам кампаний</summary><ul>{{range .CoverageSets}}<li><strong>{{.Count}} акк.</strong> · {{.Names}}</li>{{end}}</ul></details>
+{{if not .Removing}}<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="game" value="{{.Key}}">
+<fieldset><legend>Кампании для выгрузки</legend>{{range .Coverage}}<label style="display:block"><input type="checkbox" name="campaign" value="{{.ID}}"> {{.Name}}</label>{{end}}</fieldset>
+<label class="field">Условие<select name="mode"><option value="all">Все выбранные</option><option value="any">Хотя бы одна</option><option value="exact">Только этот набор</option></select></label>
+<button class="secondary" name="action" value="campaign-export">Проверить выборку</button>
+</form>{{end}}
+{{else}}<p class="muted">Сохранённых кампаний пока нет.</p>{{end}}
+</details>
 <details><summary>Правила игры · {{.PolicyLabel}}</summary>
 <form class="stack" method="post">
 <input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="action" value="game-policy"><input type="hidden" name="game" value="{{.Key}}">

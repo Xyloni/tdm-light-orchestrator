@@ -137,6 +137,7 @@ type Campaign struct {
 	StartAt, EndAt   time.Time
 	Game             struct{ Name string }
 	TimeBasedDrops   []struct {
+		ID       string
 		Name     string
 		Required int `json:"requiredMinutesWatched"`
 	}
@@ -146,7 +147,7 @@ func (c *GQLClient) Campaigns(ctx context.Context) ([]Campaign, error) {
 	const query = `query OrchestratorCatalog {
 		currentUser { dropCampaigns {
 			id name status startAt endAt game { name }
-			timeBasedDrops { name requiredMinutesWatched }
+			timeBasedDrops { id name requiredMinutesWatched }
 		} }
 	}`
 	var data struct {

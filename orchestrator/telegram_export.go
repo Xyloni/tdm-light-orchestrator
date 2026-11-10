@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 
@@ -55,27 +54,18 @@ func (s *scheduler) telegramExport(kind, value string) bot.SettingsPanel {
 		panel.Text = "Выберите игру."
 		return panel
 	}
-	var content bytes.Buffer
+	var accounts []account
 	for _, a := range s.state.Accounts {
-		if a.Game != key {
-			continue
-		}
-		acc := a.Credentials
-		fields := []string{acc.Email, acc.Login, acc.Password, acc.OAuth, acc.UserID, acc.DeviceID}
-		for _, field := range fields {
-			if strings.ContainsAny(field, ":\r\n") {
-				panel.Text = "В пуле есть запись, которую нельзя сохранить в формате account.txt. Операция отменена."
-				return panel
-			}
-		}
-		content.WriteString(strings.Join(fields, ":"))
-		content.WriteByte('\n')
-		if content.Len() > 2<<20 {
-			panel.Text = "Пул превышает 2 МБ — предел обратной загрузки account.txt через ботов. Операция отменена."
-			return panel
+		if a.Game == key {
+			accounts = append(accounts, a)
 		}
 	}
-	doc := &bot.TelegramDocument{Name: "accounts-" + ref + ".txt", Data: content.Bytes()}
+	content, err := encodeAccountFile(accounts)
+	if err != nil {
+		panel.Text = "Не удалось собрать файл. " + err.Error() + ". Операция отменена."
+		return panel
+	}
+	doc := &bot.TelegramDocument{Name: "accounts-" + ref + ".txt", Data: content}
 	if kind == "export-clear-confirm" || kind == "export-remove-confirm" {
 		doc.AfterSend = func() string {
 			s.mu.Lock()

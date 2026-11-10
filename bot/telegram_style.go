@@ -82,7 +82,8 @@ func formatTelegramPanel(action, title, text string) string {
 				label, count, _ := strings.Cut(item, ": ")
 				out.WriteString(html.EscapeString(label) + " <b>" + html.EscapeString(count) + "</b>")
 			}
-		case telegramSectionHeading(line) || strings.HasPrefix(line, "🎮 ") || line == "Самые медленные:":
+		case telegramSectionHeading(line) || strings.HasPrefix(line, "🎮 ") || strings.HasPrefix(line, "🏆 ") ||
+			strings.HasPrefix(line, "⏳ ") || strings.HasPrefix(line, "🔴 ") || line == "Самые медленные:":
 			out.WriteString("<b>" + escaped + "</b>")
 		case kind == "status" && strings.HasPrefix(line, "• "):
 			out.WriteString("<b>" + escaped + "</b>")
@@ -98,7 +99,7 @@ func formatTelegramPanel(action, title, text string) string {
 		case strings.HasPrefix(line, "Сегодня:") || strings.HasPrefix(line, "За 7 календарных дней:") || strings.HasPrefix(line, "За всё время:"):
 			label, rest, _ := strings.Cut(line, ":")
 			out.WriteString("<b>" + html.EscapeString(label) + ":</b>" + html.EscapeString(rest))
-		case strings.HasPrefix(line, "ℹ️ "):
+		case strings.HasPrefix(line, "ℹ️ ") || strings.HasPrefix(line, "🕒 "):
 			out.WriteString("<i>" + escaped + "</i>")
 		case strings.Contains(line, " · пул ") && kind == "status":
 			out.WriteString("<b>" + escaped + "</b>")
@@ -131,7 +132,9 @@ func telegramMetricLabel(label string) bool {
 		"До дедлайна сверх резерва", "Режим", "Лимит", "Стартовая скорость", "Опрос Twitch",
 		"Игры в работе", "Аккаунты в работе", "Свободный пул", "Карантин", "Последний успешный опрос",
 		"Последний успешный опрос Twitch", "Активная группа", "В очереди", "Отстают", "Проверено",
-		"Среднее отставание", "Подтверждённых эфиров кампании", "Игра", "Игр в списке", "Следующая группа", "Первая группа":
+		"Среднее отставание", "Подтверждённых эфиров кампании", "Игра", "Игр в списке", "Следующая группа", "Первая группа",
+		"Аккаунты в пуле", "Завершили", "Готово к получению", "Получено", "Статус получения неизвестен",
+		"Выбрано кампаний", "Условие", "Подходят":
 		return true
 	}
 	return false

@@ -430,6 +430,7 @@ func (w *accountWorker) markReady(drop twitch.Drop) {
 		w.st.readyDrops = make(map[string]struct{})
 	}
 	if _, exists := w.st.readyDrops[drop.ID]; exists {
+		w.st.recordRewardProgressLocked(drop, false)
 		w.st.mu.Unlock()
 		return
 	}

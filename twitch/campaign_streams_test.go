@@ -79,7 +79,7 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 	}
 	rawSingleOffline = true
 	streams, checked, total, status, err := client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
-	if err != nil || len(streams) != 0 || checked != 1 || total != 1 || !strings.Contains(status, "один канал — offline. Сейчас он офлайн.") {
+	if err != nil || len(streams) != 0 || checked != 1 || total != 1 || !strings.Contains(status, "offline · офлайн") {
 		t.Fatalf("expected a verified offline channel from fallback details: %v %d/%d %q %v", streams, checked, total, status, err)
 	}
 }

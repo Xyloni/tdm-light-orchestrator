@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	_ "embed"
 	"encoding/hex"
+	"fmt"
 	"html/template"
 	"io"
 	"net"
@@ -26,6 +27,8 @@ type panelGame struct {
 	ReserveMinutes                              int
 	Key, Name, Errors, GroupSummary             string
 	ExcludedRewards                             []string
+	Coverage                                    []coverageCampaign
+	CoverageSets                                []coverageSet
 	Accounts, Target, Deficit                   int
 	Active, Removing, Paused, Stopping, Regroup bool
 }
@@ -36,6 +39,7 @@ type notificationView struct {
 }
 
 type panelData struct {
+	CampaignExport                            *webCampaignExport
 	Lagging                                   laggingReport
 	LaggingText                               string
 	DigestAt                                  string
@@ -56,6 +60,47 @@ type panelData struct {
 	ShowConfirm                               bool
 	BotPlatform, BotOwnerID                   string
 	BotTokenSaved, LegacyBots                 bool
+}
+
+type webCampaignExport struct {
+	Game, Name, Mode, ModeLabel, Fingerprint string
+	IDs                                      []string
+	Names                                    []string
+	Count                                    int
+}
+
+func (s *scheduler) prepareWebCampaignExport(form url.Values) (webCampaignExport, []byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := form.Get("game")
+	g := s.state.Games[key]
+	if g == nil || g.Removing {
+		return webCampaignExport{}, nil, fmt.Errorf("игра недоступна")
+	}
+	ids, mode := form["campaign"], form.Get("mode")
+	accounts, err := s.coverage(key, g).selectAccounts(ids, mode)
+	if err != nil {
+		return webCampaignExport{}, nil, err
+	}
+	if len(accounts) == 0 {
+		return webCampaignExport{}, nil, fmt.Errorf("по фильтру нет аккаунтов")
+	}
+	data, err := encodeAccountFile(accounts)
+	if err != nil {
+		return webCampaignExport{}, nil, err
+	}
+	names := make([]string, 0, len(ids))
+	for _, c := range g.Campaigns {
+		for _, id := range ids {
+			if c.ID == id {
+				names = append(names, c.Name)
+				break
+			}
+		}
+	}
+	sort.Strings(names)
+	return webCampaignExport{Game: key, Name: g.Name, Mode: mode, ModeLabel: campaignExportModeLabel(mode),
+		IDs: ids, Names: names, Count: len(accounts), Fingerprint: campaignExportFingerprint(data)}, data, nil
 }
 
 func (s *scheduler) panel(token, message string, showConfirm bool) panelData {
@@ -89,12 +134,14 @@ func (s *scheduler) panel(token, message string, showConfirm bool) panelData {
 	now := time.Now()
 	for key, g := range s.state.Games {
 		groupSummary := s.queueSummary(key, g, now)
+		coverage := s.coverage(key, g)
 		a := s.active[key]
 		stopping := a != nil && a.stopping
 		policy := s.gameSettings(g)
 		view.Games = append(view.Games, panelGame{
 			Mode: g.Mode, ReserveMinutes: g.ReserveMinutes, PolicyLabel: policy.modeName() + " · запас " + strconv.Itoa(policy.ReserveMinutes) + " мин",
 			Report: s.campaignReport(g), Quarantine: s.quarantineSummary(key),
+			Coverage: coverage.Campaigns, CoverageSets: coverage.Sets,
 			Key: key, Name: g.Name, Accounts: counts[key], Target: g.Target, Deficit: max(0, g.Target-counts[key]),
 			Active: a != nil, Removing: g.Removing, Paused: g.Paused, Stopping: stopping, Regroup: g.Regroup, Errors: s.accountErrors(key), GroupSummary: groupSummary, ExcludedRewards: append([]string(nil), g.ExcludedRewards...),
 		})
@@ -228,6 +275,7 @@ func webHandler(s *scheduler) (http.Handler, error) {
 		var categories []string
 		var searchQuery string
 		var searchTarget int
+		var campaignExport *webCampaignExport
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, (2<<20)+8192)
 			multipart := strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data")
@@ -248,7 +296,25 @@ func webHandler(s *scheduler) (http.Handler, error) {
 				return
 			}
 			action := r.PostForm.Get("action")
-			if action == "upload" && multipart {
+			if action == "campaign-export" || action == "campaign-export-confirm" {
+				preview, data, err := s.prepareWebCampaignExport(r.PostForm)
+				switch {
+				case err != nil:
+					message = err.Error()
+				case action == "campaign-export":
+					campaignExport = &preview
+				case subtle.ConstantTimeCompare([]byte(r.PostForm.Get("fingerprint")), []byte(preview.Fingerprint)) != 1:
+					message = "Состав выборки изменился. Проверьте количество перед повторным подтверждением."
+					campaignExport = &preview
+				default:
+					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+					w.Header().Set("Content-Disposition", `attachment; filename="accounts-campaigns.txt"`)
+					w.Header().Set("Cache-Control", "no-store")
+					w.Header().Set("X-Content-Type-Options", "nosniff")
+					_, _ = w.Write(data)
+					return
+				}
+			} else if action == "upload" && multipart {
 				file, _, err := r.FormFile("accounts")
 				if err != nil {
 					http.Error(w, "Expected account file", http.StatusBadRequest)
@@ -290,6 +356,7 @@ func webHandler(s *scheduler) (http.Handler, error) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Frame-Options", "DENY")
 		view := s.panel(token, message, showConfirm)
+		view.CampaignExport = campaignExport
 		view.Categories, view.SearchQuery, view.SearchTarget = categories, searchQuery, searchTarget
 		_ = page.Execute(w, view)
 	}), nil

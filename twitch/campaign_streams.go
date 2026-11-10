@@ -82,7 +82,7 @@ func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string
 		}
 		switch {
 		case total == 1 && offline == 1:
-			status = fmt.Sprintf("В списке кампании один канал — %s. Сейчас он офлайн.", allowlist[0])
+			status = fmt.Sprintf("В списке кампании один канал.\n🔴 %s · офлайн", allowlist[0])
 		case total == checked && offline == total:
 			status = fmt.Sprintf("Все %d каналов из списка кампании сейчас офлайн.", total)
 		case len(streams) == 0 && err == nil && ctx.Err() == nil:

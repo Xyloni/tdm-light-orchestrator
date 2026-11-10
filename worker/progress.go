@@ -20,7 +20,8 @@ func (s *AccountState) setProgress(drop twitch.Drop) {
 }
 
 func (s *AccountState) recordRewardProgressLocked(drop twitch.Drop, ready bool) {
-	if !s.trackStats || drop.ID == "" || (!drop.ProgressKnown && !ready) {
+	earned := drop.IsClaimed || (drop.ProgressKnown && drop.Required > 0 && drop.Current >= drop.Required)
+	if !s.trackStats || drop.ID == "" || (!drop.ProgressKnown && !ready && !earned) {
 		return
 	}
 	if s.rewardProgress == nil {
@@ -38,6 +39,8 @@ func (s *AccountState) recordRewardProgressLocked(drop twitch.Drop, ready bool) 
 		item.Minutes = max(item.Minutes, current)
 	}
 	item.Ready = item.Ready || ready
+	item.Earned = item.Earned || earned
+	item.Claimed = item.Claimed || drop.IsClaimed
 	s.rewardProgress[drop.ID] = item
 }
 

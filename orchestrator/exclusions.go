@@ -10,6 +10,7 @@ import (
 )
 
 type rewardRequirement struct {
+	ID      string
 	Name    string
 	Minutes int
 }

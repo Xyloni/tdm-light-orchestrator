@@ -26,6 +26,8 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 	}
 	kind, exportValue, _ := strings.Cut(action, ":")
 	switch kind {
+	case "cov", "cov-sets", "cov-export", "cov-toggle", "cov-mode", "cov-page", "cov-confirm":
+		return s.telegramCoveragePanel(kind, exportValue)
 	case "help", "help-commands":
 		return telegramHelp(exportValue, kind == "help-commands")
 	case "logs":
@@ -339,6 +341,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 				if !g.Removing {
 					row(button("Пул аккаунтов", "game-pool:"+value), button("Настройки игры", "game-options:"+value))
 					row(button("Статистика", "game-stats:"+value), button("История кампаний", "report:"+value))
+					row(button("🏆 Кампании в пуле", "cov:"+value))
 					row(button("Предпросмотр", "game-preview:"+value), button("Отстающие", "game-lagging:"+value))
 					if c := g.Campaigns[g.Current]; c != nil && c.Finished == "" && len(c.Group) > 0 {
 						if !g.Paused && s.active[key] != nil && !s.active[key].stopping {

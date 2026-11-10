@@ -32,10 +32,11 @@ func (m *Manager) allowsStream(stream twitch.Stream) bool {
 }
 
 type ManagedRewardProgress struct {
-	Name           string
-	ID             string
-	First, Minutes int
-	Known, Ready   bool
+	Name            string
+	ID              string
+	First, Minutes  int
+	Known, Ready    bool
+	Earned, Claimed bool
 }
 
 type ManagedProgress struct {
