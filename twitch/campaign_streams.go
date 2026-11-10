@@ -35,12 +35,18 @@ func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string
 			}
 		}
 	}
+	queriedChannels := make(map[string]bool)
 	check := func(stream Stream) {
 		if !strings.EqualFold(stream.Game, game) || stream.GameID == "" || stream.ChannelID == "" || stream.BroadcastID == "" || stream.Login == "" {
 			return
 		}
+		if queriedChannels[stream.ChannelID] {
+			return
+		}
+		queriedChannels[stream.ChannelID] = true
 		ok, lookupErr := c.channelHasCampaign(ctx, stream.ChannelID, campaignID)
 		if lookupErr != nil {
+			delete(queriedChannels, stream.ChannelID)
 			err = errors.New("Twitch не подтвердил кампанию на проверяемых каналах")
 		} else if ok {
 			streams = append(streams, stream)
@@ -64,38 +70,45 @@ func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string
 		}
 	}
 	if len(allowlist) == 0 || (len(streams) == 0 && err != nil && ctx.Err() == nil) {
-		var candidates []Stream
-		candidates, directoryErr := c.TopStreams(ctx, game, 30)
-		if errors.Is(directoryErr, ErrNoDropsStreams) {
-			return nil, checked, total, errors.Join(err, detailsErr)
-		}
-		if directoryErr != nil {
-			return nil, 0, 0, errors.New("Twitch не вернул каталог эфиров категории")
-		}
 		allowed := make(map[string]bool, len(allowlist))
 		for _, login := range allowlist {
 			allowed[strings.ToLower(login)] = true
 		}
-		if len(allowed) == 0 {
-			total = len(candidates)
-		}
-		for _, stream := range candidates {
-			if ctx.Err() != nil {
+		seen := make(map[string]bool)
+		for _, dropsOnly := range []bool{true, false} {
+			if ctx.Err() != nil || len(streams) > 0 {
 				break
 			}
-			if len(allowed) > 0 && !allowed[strings.ToLower(stream.Login)] {
+			candidates, directoryErr := c.categoryStreams(ctx, game, dropsOnly)
+			if errors.Is(directoryErr, ErrNoDropsStreams) {
 				continue
 			}
-			if len(allowed) == 0 {
-				checked++
+			if directoryErr != nil {
+				err = errors.New("Twitch не вернул каталог эфиров категории")
+				continue
 			}
-			check(stream)
+			for _, stream := range candidates {
+				if ctx.Err() != nil {
+					break
+				}
+				if len(allowed) > 0 && !allowed[strings.ToLower(stream.Login)] {
+					continue
+				}
+				if len(allowed) == 0 && !seen[stream.Login] {
+					seen[stream.Login] = true
+					total++
+					checked++
+				}
+				check(stream)
+			}
 		}
 	}
 	if ctx.Err() != nil {
 		err = errors.New("Twitch не ответил в пределах времени проверки эфиров")
 	} else if len(streams) == 0 && err == nil {
-		err = detailsErr
+		if detailsErr != nil {
+			err = fmt.Errorf("Список каналов кампании недоступен. В каталоге категории найдено %d каналов, на %d проверен ID кампании, совпадений нет", total, len(queriedChannels))
+		}
 	}
 	return
 }

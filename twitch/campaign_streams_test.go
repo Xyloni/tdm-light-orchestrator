@@ -35,6 +35,9 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 			data = `{"game":{"slug":"game"}}`
 		case "DirectoryPage_Game":
 			data = `{"game":{"streams":{"edges":[{"node":{"id":"2","game":{"id":"3","displayName":"Game"},"broadcaster":{"id":"1","login":"live"}}}]}}}`
+			if request.Variables["includeCostreaming"] == false {
+				data = `{"game":{"streams":{"edges":[]}}}`
+			}
 		case "VideoPlayerStreamInfoOverlayChannel":
 			if request.Variables["channel"] == "offline" {
 				data = `{"user":{"stream":null}}`

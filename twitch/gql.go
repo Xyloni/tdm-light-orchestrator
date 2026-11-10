@@ -353,6 +353,10 @@ func (c *GQLClient) StreamMetadata(ctx context.Context, login string) (Stream, e
 
 // TopStreams — онлайн-стримы игры (предпочтительно с включёнными Drops).
 func (c *GQLClient) TopStreams(ctx context.Context, gameName string, _ int) ([]Stream, error) {
+	return c.categoryStreams(ctx, gameName, true)
+}
+
+func (c *GQLClient) categoryStreams(ctx context.Context, gameName string, dropsOnly bool) ([]Stream, error) {
 	const gameSlugQuery = `query GameSlug($name: String!) { game(name: $name) { slug } }`
 	const directoryHash = "cb5dc816e139dcb8a118f14b4b677d59abc224a4b016c4bc2bb00a47fe0ddec4"
 	var slugData struct {
@@ -387,14 +391,18 @@ func (c *GQLClient) TopStreams(ctx context.Context, gameName string, _ int) ([]S
 			} `json:"streams"`
 		} `json:"game"`
 	}
+	filters := []string{}
+	if dropsOnly {
+		filters = append(filters, "DROPS_ENABLED")
+	}
 	vars := map[string]any{
 		"limit": 30, "slug": slugData.Game.Slug, "imageWidth": 50,
-		"includeCostreaming": false, "sortTypeIsRecency": false,
+		"includeCostreaming": !dropsOnly, "sortTypeIsRecency": false,
 		"options": map[string]any{
 			"broadcasterLanguages": []string{}, "freeformTags": nil,
 			"includeRestricted":      []string{"SUB_ONLY_LIVE"},
 			"recommendationsContext": map[string]any{"platform": "web"},
-			"sort":                   "VIEWER_COUNT", "systemFilters": []string{"DROPS_ENABLED"},
+			"sort":                   "VIEWER_COUNT", "systemFilters": filters,
 			"tags": []string{}, "requestID": "JIRA-VXP-2397",
 		},
 	}
