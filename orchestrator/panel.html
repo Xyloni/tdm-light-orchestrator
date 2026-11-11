@@ -167,6 +167,11 @@ code { color: #e5c8ff }
 <label class="field">Режим группировки<select name="mode"><option value="">Общий режим</option><option value="speed" {{if eq .Mode "speed"}}selected{{end}}>Скорость</option><option value="resources" {{if eq .Mode "resources"}}selected{{end}}>Экономия ресурсов</option></select></label>
 <label class="field">Резерв на всю кампанию, мин · 0 для общего значения<input name="reserve" type="number" min="0" max="1440" value="{{.ReserveMinutes}}" required></label>
 <button>Сохранить правила игры</button>
+</form>
+<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="action" value="game-claim"><input type="hidden" name="game" value="{{.Key}}">
+{{if .AutoClaimDrops}}<button class="secondary" name="enabled" value="off">Автополучение включено · выключить</button>
+{{else}}<button class="secondary" name="enabled" value="on">Автополучение выключено · включить</button>{{end}}
 </form></details>
 <details><summary>История кампаний</summary><pre>{{.Report}}</pre></details>
 <details><summary>Карантин игры</summary><pre>{{.Quarantine}}</pre></details>

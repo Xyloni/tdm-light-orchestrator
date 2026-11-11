@@ -22,6 +22,7 @@ type accountWorker struct {
 	startupDelay     time.Duration
 	unavailable      map[string]time.Time
 	nextRateRecovery time.Time
+	claimAttempts    map[string]int
 }
 
 func (w *accountWorker) Run(ctx context.Context) {
@@ -119,6 +120,15 @@ func (w *accountWorker) retryAuth(ctx context.Context, rnd *rand.Rand, attempts 
 
 // nextDrop — первый невыкупленный и незавершённый дроп по целевой игре.
 func (w *accountWorker) nextDrop(ctx context.Context) (twitch.Drop, bool, error) {
+	for {
+		drop, found, err := w.scanDrops(ctx)
+		if err != errClaimRefresh {
+			return drop, found, err
+		}
+	}
+}
+
+func (w *accountWorker) scanDrops(ctx context.Context) (twitch.Drop, bool, error) {
 	drops, err := w.gql.DropsDashboard(ctx)
 	if err != nil {
 		return twitch.Drop{}, false, err
@@ -150,6 +160,11 @@ func (w *accountWorker) nextDrop(ctx context.Context) (twitch.Drop, bool, error)
 		if d.ProgressKnown && d.Current >= d.Required {
 			w.st.setProgress(d)
 			w.markReady(d)
+			if w.m.cfg.AutoClaimDrops {
+				if err := w.claimReadyDrop(ctx, d); err != nil {
+					return twitch.Drop{}, false, err
+				}
+			}
 			continue
 		}
 		if w.m.cfg.ManagedAuthAttempts == 0 {
@@ -179,7 +194,7 @@ func (w *accountWorker) nextDrop(ctx context.Context) (twitch.Drop, bool, error)
 	return twitch.Drop{}, false, nil
 }
 
-// farmDrop набирает время дропа. Получение награды остаётся пользователю.
+// farmDrop набирает время дропа. Получение обрабатывается после обновления Inventory.
 func (w *accountWorker) farmDrop(ctx context.Context, rnd *rand.Rand, drop twitch.Drop) error {
 	return w.farmDropScheduled(ctx, rnd, drop, watchIntervals{
 		hls:      20 * time.Second,
@@ -240,6 +255,7 @@ func (w *accountWorker) farmDropScheduled(parent context.Context, rnd *rand.Rand
 			return true
 		}
 		if cur.IsClaimed {
+			w.markReady(cur)
 			w.st.addLog("«" + cur.Name + "» уже получен")
 			return true
 		}
@@ -446,7 +462,11 @@ func (w *accountWorker) markReady(drop twitch.Drop) {
 	w.st.recordRewardProgressLocked(drop, announce)
 	w.st.mu.Unlock()
 	if announce {
-		w.st.addLog(fmt.Sprintf("✅ ВРЕМЯ НАБРАНО: %s (%d/%d мин); получение вручную", drop.Name, drop.Current, drop.Required))
+		message := "получение вручную"
+		if w.m.cfg.AutoClaimDrops {
+			message = "ожидается подтверждение получения"
+		}
+		w.st.addLog(fmt.Sprintf("✅ ВРЕМЯ НАБРАНО: %s (%d/%d мин); %s", drop.Name, drop.Current, drop.Required, message))
 	}
 	w.m.recordReady(w.acc, drop, announce)
 }

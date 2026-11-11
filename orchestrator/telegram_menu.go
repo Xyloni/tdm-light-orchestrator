@@ -213,6 +213,25 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 			row(button("Подтвердить остановку", "trim-confirm"))
 		}
 	default:
+		if value, ok := strings.CutPrefix(action, "game-claim:"); ok {
+			ref, setting, _ := strings.Cut(value, ":")
+			if setting != "on" && setting != "off" {
+				panel.Text = "Укажите режим автополучения."
+				return panel
+			}
+			message := "Игра недоступна."
+			s.mu.Lock()
+			for key := range s.state.Games {
+				if gameRef(key) == ref {
+					message = s.setAutoClaim(key, setting == "on")
+					break
+				}
+			}
+			s.mu.Unlock()
+			panel = s.telegramMenu("game-options:" + ref)
+			panel.Text = message + "\n\n" + panel.Text
+			return panel
+		}
 		if value, ok := strings.CutPrefix(action, "find-choice:"); ok {
 			return s.telegramSelectGame(value)
 		}
@@ -305,6 +324,11 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 					cfg := s.gameSettings(g)
 					panel.Text = fmt.Sprintf("Режим: %s\nРезерв кампании: %d мин\n\n%s", cfg.modeName(), cfg.ReserveMinutes, s.exclusionList(key))
 					row(button("Правила игры", "prompt:policy:"+value))
+					if g.AutoClaimDrops {
+						row(button("🎁 Автополучение вкл. · выключить", "game-claim:"+value+":off"))
+					} else {
+						row(button("🎁 Автополучение выкл. · включить", "game-claim:"+value+":on"))
+					}
 					row(button("Исключить награду", "prompt:exclude:"+value), button("Вернуть награду", "prompt:include:"+value))
 					row(button("Удалить игру", "remove:"+value))
 					row(button("К игре", "game:"+value))

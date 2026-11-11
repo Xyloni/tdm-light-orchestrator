@@ -35,6 +35,7 @@ type account struct {
 }
 
 type gameState struct {
+	AutoClaimDrops   bool
 	Mode             string
 	ReserveMinutes   int
 	ExcludedRewards  []string

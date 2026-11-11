@@ -248,9 +248,11 @@ func (c *GQLClient) DropsDashboard(ctx context.Context) ([]Drop, error) {
 			}
 			if d.Self != nil {
 				drop.IsClaimed = d.Self.Claimed
+				if personal {
+					drop.DropInstanceID = d.Self.InstanceID
+				}
 				if personal && d.Self.Current != nil {
 					drop.Current = *d.Self.Current
-					drop.DropInstanceID = d.Self.InstanceID
 					drop.ProgressKnown = true
 				}
 			}

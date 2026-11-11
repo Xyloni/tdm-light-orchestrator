@@ -17,6 +17,7 @@ type rewardRequirement struct {
 
 func (s *scheduler) configForGame(g *gameState) config.Config {
 	cfg := s.miner
+	cfg.AutoClaimDrops = g.AutoClaimDrops
 	cfg.IgnoredDropNames = append(append([]string(nil), cfg.IgnoredDropNames...), g.ExcludedRewards...)
 	return cfg
 }

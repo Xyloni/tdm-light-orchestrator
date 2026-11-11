@@ -11,6 +11,7 @@ import (
 
 // Config — вся конфигурация сервиса.
 type Config struct {
+	AutoClaimDrops          bool     `json:"auto_claim_drops"`
 	CampaignID              string   `json:"campaign_id,omitempty"`
 	DailyLogs               bool     `json:"-"`
 	ManagedAuthAttempts     int      `json:"-"`
@@ -131,7 +132,7 @@ func applyOSEnv(cfg *Config) {
 		"TARGET_GAME", "CLIENT_ID", "TELEGRAM_BOT_TOKEN", "TELEGRAM_ADMIN_ID",
 		"IGNORED_DROP_NAMES", "STOP_WHEN_IDLE", "IDLE_CHECK_ROUNDS",
 		"ACCOUNTS_FILE", "HEARTBEAT_INTERVAL_SEC", "CAMPAIGN_POLL_INTERVAL_SEC",
-		"JITTER_SEC", "GROUP_SESSION_MINUTES", "LOG_DIR", "USE_PUBSUB", "SINGLE_LOG", "DIAGNOSTICS",
+		"JITTER_SEC", "GROUP_SESSION_MINUTES", "LOG_DIR", "AUTO_CLAIM_DROPS", "USE_PUBSUB", "SINGLE_LOG", "DIAGNOSTICS",
 	} {
 		if v, ok := os.LookupEnv(k); ok {
 			applyKV(cfg, k, v)
@@ -204,6 +205,8 @@ func applyKV(cfg *Config, key, val string) {
 		cfg.Diagnostics = val == "1" || strings.EqualFold(val, "true")
 	case "LOG_DIR":
 		cfg.LogDir = val
+	case "AUTO_CLAIM_DROPS":
+		cfg.AutoClaimDrops = val == "1" || strings.EqualFold(val, "true")
 	case "USE_PUBSUB":
 		cfg.UsePubSub = val == "1" || strings.EqualFold(val, "true")
 	}

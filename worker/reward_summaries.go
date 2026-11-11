@@ -90,7 +90,11 @@ func (m *Manager) readySummaries(completeOnly bool) []string {
 		if b.ready >= b.total {
 			state = "Награда готова у всей группы"
 		}
-		result = append(result, fmt.Sprintf("🎁 %s\nГруппа %d · %s (цель %d мин)\nГотово: %d/%d · новых: %d\nКампания: %s\nПолучение вручную. Подробности: /status и /logs.", state, b.group, summaryLabel(b.name), b.required, b.ready, b.total, b.newReady, summaryLabel(b.campaign)))
+		hint := "Получение вручную."
+		if m.cfg.AutoClaimDrops {
+			hint = "Получение проверяется в инвентаре Twitch."
+		}
+		result = append(result, fmt.Sprintf("🎁 %s\nГруппа %d · %s (цель %d мин)\nГотово: %d/%d · новых: %d\nКампания: %s\n%s Подробности: /status и /logs.", state, b.group, summaryLabel(b.name), b.required, b.ready, b.total, b.newReady, summaryLabel(b.campaign), hint))
 	}
 	return result
 }

@@ -29,6 +29,7 @@ type panelGame struct {
 	Key, Name, Errors, GroupSummary             string
 	ExcludedRewards                             []string
 	SelectedCampaign                            string
+	AutoClaimDrops                              bool
 	CampaignOptions                             []campaignOption
 	Coverage                                    []coverageCampaign
 	CoverageSets                                []coverageSet
@@ -171,7 +172,7 @@ func (s *scheduler) panel(token, message string, showConfirm bool) panelData {
 			Mode: g.Mode, ReserveMinutes: g.ReserveMinutes, PolicyLabel: policy.modeName() + " · запас " + strconv.Itoa(policy.ReserveMinutes) + " мин",
 			Report: s.campaignReport(g), Quarantine: s.quarantineSummary(key),
 			Coverage: coverage.Campaigns, CoverageSets: coverage.Sets,
-			SelectedCampaign: g.SelectedCampaign, CampaignOptions: options,
+			SelectedCampaign: g.SelectedCampaign, CampaignOptions: options, AutoClaimDrops: g.AutoClaimDrops,
 			Key: key, Name: g.Name, Accounts: counts[key], Target: g.Target, Deficit: max(0, g.Target-counts[key]),
 			Active: a != nil, Removing: g.Removing, Paused: g.Paused, Stopping: stopping, Regroup: g.Regroup, Errors: s.accountErrors(key), GroupSummary: groupSummary, ExcludedRewards: append([]string(nil), g.ExcludedRewards...),
 		})
@@ -204,6 +205,10 @@ func (s *scheduler) panelAction(form url.Values) string {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		return s.changeCampaignSelection(strings.ToLower(game), form.Get("campaign"), time.Now())
+	case "game-claim":
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.setAutoClaim(strings.ToLower(game), form.Get("enabled") == "on")
 	case "game-policy":
 		s.mu.Lock()
 		defer s.mu.Unlock()

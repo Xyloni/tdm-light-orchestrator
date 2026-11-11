@@ -36,6 +36,28 @@ func (s *scheduler) changeGamePolicy(key, mode, reserve string) string {
 	return "Правила игры сохранены. Они применятся к следующим группам."
 }
 
+func (s *scheduler) setAutoClaim(key string, enabled bool) string {
+	g := s.state.Games[key]
+	if g == nil || g.Removing {
+		return "Игра недоступна."
+	}
+	if g.AutoClaimDrops != enabled {
+		g.AutoClaimDrops = enabled
+		if !s.persist() {
+			g.AutoClaimDrops = !enabled
+			return s.notice
+		}
+		if a := s.active[key]; a != nil && !a.stopping {
+			a.stopping = true
+			a.process.stop()
+		}
+	}
+	if enabled {
+		return "Автополучение включено. Получение проверяется в инвентаре Twitch."
+	}
+	return "Автополучение выключено."
+}
+
 func (s *scheduler) queueSummary(key string, g *gameState, now time.Time) string {
 	if g.Removing {
 		return "Игра удаляется."
