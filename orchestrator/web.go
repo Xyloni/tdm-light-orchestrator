@@ -73,6 +73,8 @@ type panelData struct {
 
 type webCampaignExport struct {
 	Game, Name, Mode, ModeLabel, Fingerprint string
+	Format                                   accountExportFormat
+	FormatLabel                              string
 	IDs                                      []string
 	Names                                    []string
 	Count                                    int
@@ -94,7 +96,17 @@ func (s *scheduler) prepareWebCampaignExport(form url.Values) (webCampaignExport
 	if len(accounts) == 0 {
 		return webCampaignExport{}, nil, fmt.Errorf("по фильтру нет аккаунтов")
 	}
-	data, err := encodeAccountFile(accounts)
+	format := accountExportFormat(form.Get("format"))
+	formatLabel := "Полный TXT"
+	switch format {
+	case "", exportFull:
+		format = exportFull
+	case exportLoginPassword:
+		formatLabel = "Логин:пароль"
+	default:
+		return webCampaignExport{}, nil, fmt.Errorf("неизвестный формат выгрузки")
+	}
+	data, err := encodeAccountFile(accounts, format)
 	if err != nil {
 		return webCampaignExport{}, nil, err
 	}
@@ -109,7 +121,7 @@ func (s *scheduler) prepareWebCampaignExport(form url.Values) (webCampaignExport
 	}
 	sort.Strings(names)
 	return webCampaignExport{Game: key, Name: g.Name, Mode: mode, ModeLabel: campaignExportModeLabel(mode),
-		IDs: ids, Names: names, Count: len(accounts), Fingerprint: campaignExportFingerprint(data)}, data, nil
+		Format: format, FormatLabel: formatLabel, IDs: ids, Names: names, Count: len(accounts), Fingerprint: campaignExportFingerprint(data)}, data, nil
 }
 
 func (s *scheduler) panel(token, message string, showConfirm bool) panelData {
@@ -330,7 +342,7 @@ func webHandler(s *scheduler) (http.Handler, error) {
 					campaignExport = &preview
 				default:
 					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-					w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": accountExportName(preview.Name, preview.Names...)}))
+					w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": accountExportName(preview.Format, preview.Name, preview.Names...)}))
 					w.Header().Set("Cache-Control", "no-store")
 					w.Header().Set("X-Content-Type-Options", "nosniff")
 					_, _ = w.Write(data)

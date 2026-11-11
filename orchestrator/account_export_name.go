@@ -7,7 +7,7 @@ import (
 	"unicode"
 )
 
-func accountExportName(pool string, campaigns ...string) string {
+func accountExportName(format accountExportFormat, pool string, campaigns ...string) string {
 	safePart := func(value string, limit int) string {
 		var result strings.Builder
 		for _, r := range strings.Join(strings.Fields(value), " ") {
@@ -22,6 +22,9 @@ func accountExportName(pool string, campaigns ...string) string {
 		return strings.Trim(result.String(), " .-")
 	}
 	name := "Аккаунты"
+	if format == exportLoginPassword {
+		name = "Логины и пароли"
+	}
 	if part := safePart(pool, 60); part != "" {
 		name += " — " + part
 	}

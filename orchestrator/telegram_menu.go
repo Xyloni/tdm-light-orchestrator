@@ -28,7 +28,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 	switch kind {
 	case "farm-campaign", "farm-pick":
 		return s.telegramCampaignSelection(kind, exportValue)
-	case "cov", "cov-sets", "cov-export", "cov-toggle", "cov-mode", "cov-page", "cov-confirm":
+	case "cov", "cov-sets", "cov-export", "cov-toggle", "cov-mode", "cov-page", "cov-confirm", "cov-pairs":
 		return s.telegramCoveragePanel(kind, exportValue)
 	case "help", "help-commands":
 		return telegramHelp(exportValue, kind == "help-commands")
@@ -50,7 +50,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		}
 		row(button("В меню", "menu"))
 		return panel
-	case "export", "export-confirm", "export-clear-confirm", "export-remove-confirm":
+	case "export", "export-confirm", "export-pairs", "export-clear-confirm", "export-remove-confirm":
 		return s.telegramExport(kind, exportValue)
 	}
 	switch action {
@@ -172,7 +172,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		}
 		kind, exportValue, _ := strings.Cut(action, ":")
 		switch kind {
-		case "export", "export-confirm", "export-clear-confirm", "export-remove-confirm":
+		case "export", "export-confirm", "export-pairs", "export-clear-confirm", "export-remove-confirm":
 			return s.telegramExport(kind, exportValue)
 		}
 		switch action {

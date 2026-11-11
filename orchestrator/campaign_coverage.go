@@ -157,14 +157,24 @@ func campaignExportModeLabel(mode string) string {
 	return ""
 }
 
-func encodeAccountFile(accounts []account) ([]byte, error) {
+type accountExportFormat string
+
+const (
+	exportFull          accountExportFormat = "full"
+	exportLoginPassword accountExportFormat = "login-password"
+)
+
+func encodeAccountFile(accounts []account, format accountExportFormat) ([]byte, error) {
 	var content bytes.Buffer
 	for _, a := range accounts {
 		acc := a.Credentials
 		fields := []string{acc.Email, acc.Login, acc.Password, acc.OAuth, acc.UserID, acc.DeviceID}
+		if format == exportLoginPassword {
+			fields = fields[1:3]
+		}
 		for _, field := range fields {
 			if strings.ContainsAny(field, ":\r\n") {
-				return nil, fmt.Errorf("в пуле есть запись, которую нельзя сохранить в формате account.txt")
+				return nil, fmt.Errorf("в пуле есть запись, которую нельзя сохранить в выбранном формате")
 			}
 		}
 		content.WriteString(strings.Join(fields, ":"))

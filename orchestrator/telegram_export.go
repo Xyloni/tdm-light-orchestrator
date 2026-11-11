@@ -38,8 +38,8 @@ func (s *scheduler) telegramExport(kind, value string) bot.SettingsPanel {
 		return panel
 	}
 	if kind == "export" {
-		panel.Text = fmt.Sprintf("Выгрузить .txt из пула «%s»? Аккаунтов: %d. Файл содержит учётные данные Twitch.", label, count)
-		panel.Buttons = append([][]bot.SettingsButton{{s.exportButton("Подтвердить выгрузку", "export-confirm", ref, key)}}, panel.Buttons...)
+		panel.Text = fmt.Sprintf("Выберите формат .txt для пула «%s». Аккаунтов: %d. Файл содержит учётные данные Twitch.", label, count)
+		panel.Buttons = append([][]bot.SettingsButton{{s.exportButton("Скачать полный TXT", "export-confirm", ref, key)}, {s.exportButton("Скачать логин:пароль", "export-pairs", ref, key)}}, panel.Buttons...)
 		return panel
 	}
 	if preview != fingerprint[:12] {
@@ -60,12 +60,16 @@ func (s *scheduler) telegramExport(kind, value string) bot.SettingsPanel {
 			accounts = append(accounts, a)
 		}
 	}
-	content, err := encodeAccountFile(accounts)
+	format := exportFull
+	if kind == "export-pairs" {
+		format = exportLoginPassword
+	}
+	content, err := encodeAccountFile(accounts, format)
 	if err != nil {
 		panel.Text = "Не удалось собрать файл. " + err.Error() + ". Операция отменена."
 		return panel
 	}
-	doc := &bot.TelegramDocument{Name: accountExportName(label), Data: content}
+	doc := &bot.TelegramDocument{Name: accountExportName(format, label), Data: content}
 	if kind == "export-clear-confirm" || kind == "export-remove-confirm" {
 		doc.AfterSend = func() string {
 			s.mu.Lock()

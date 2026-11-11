@@ -110,11 +110,15 @@ func (s *scheduler) telegramCoveragePanel(kind, value string) bot.SettingsPanel 
 	case "cov-page":
 		selection.page, _ = strconv.Atoi(arg)
 	}
-	if kind == "cov-confirm" {
+	if kind == "cov-confirm" || kind == "cov-pairs" {
+		format := exportFull
+		if kind == "cov-pairs" {
+			format = exportLoginPassword
+		}
 		accounts, err := coverage.selectAccounts(selection.ids, selection.mode)
 		if err != nil || len(accounts) == 0 {
 			panel.Text = "Состав выборки изменился. Откройте выгрузку заново."
-		} else if data, err := encodeAccountFile(accounts); err != nil {
+		} else if data, err := encodeAccountFile(accounts, format); err != nil {
 			panel.Text = "Не удалось собрать файл. " + err.Error() + "."
 		} else if arg != campaignExportFingerprint(data) {
 			panel.Text = "Состав выборки изменился. Проверьте новый результат перед выгрузкой."
@@ -125,7 +129,7 @@ func (s *scheduler) telegramCoveragePanel(kind, value string) bot.SettingsPanel 
 					names = append(names, c.Name)
 				}
 			}
-			panel.Document = &bot.TelegramDocument{Name: accountExportName(game.Name, names...), Data: data}
+			panel.Document = &bot.TelegramDocument{Name: accountExportName(format, game.Name, names...), Data: data}
 			row("К кампаниям", "cov:"+ref)
 			return panel
 		}
@@ -140,10 +144,15 @@ func (s *scheduler) telegramCoveragePanel(kind, value string) bot.SettingsPanel 
 	if accounts, err := coverage.selectAccounts(selection.ids, selection.mode); err == nil {
 		panel.Text += fmt.Sprintf("\nПодходят: %d / %d", len(accounts), len(coverage.Accounts))
 		if len(accounts) > 0 {
-			if data, err := encodeAccountFile(accounts); err == nil {
-				row("✅ Подтвердить выгрузку .txt", "cov-confirm:"+ref+":"+campaignExportFingerprint(data))
-			} else {
-				panel.Text += "\n⚠️ " + err.Error() + "."
+			for _, option := range []struct {
+				format        accountExportFormat
+				label, action string
+			}{{exportFull, "📄 Скачать полный TXT", "cov-confirm"}, {exportLoginPassword, "🔑 Скачать логин:пароль", "cov-pairs"}} {
+				if data, err := encodeAccountFile(accounts, option.format); err == nil {
+					row(option.label, option.action+":"+ref+":"+campaignExportFingerprint(data))
+				} else {
+					panel.Text += "\n⚠️ " + option.label + " · " + err.Error() + "."
+				}
 			}
 		}
 	}

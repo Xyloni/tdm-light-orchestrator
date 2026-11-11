@@ -22,7 +22,7 @@ func TestCampaignCoverageAndConfirmedTelegramExport(t *testing.T) {
 	}}
 	s.state.Games["example"] = g
 	for _, login := range []string{"ready", "claimed", "legacy", "partial"} {
-		s.state.Accounts = append(s.state.Accounts, account{Game: "example", Credentials: parser.Account{Login: login, UserID: login}})
+		s.state.Accounts = append(s.state.Accounts, account{Game: "example", Credentials: parser.Account{Login: login, UserID: login, Password: "fixture-" + login}})
 	}
 	s.state.Stats.Progress = map[string]rewardWatermark{
 		"example\x00swiss\x00ready\x00reward":   {Earned: true},
@@ -54,6 +54,11 @@ func TestCampaignCoverageAndConfirmedTelegramExport(t *testing.T) {
 		!strings.Contains(string(file.Data), ":legacy:") || !strings.Contains(string(file.Data), ":claimed:") {
 		t.Fatal("exact export included the wrong set")
 	}
+	pairs := panel.Buttons[1][0].Action
+	if file := s.telegramMenu(pairs).Document; file == nil || file.Name != "Логины и пароли — Example — Swiss.txt" ||
+		string(file.Data) != "claimed:fixture-claimed\nlegacy:fixture-legacy\n" {
+		t.Fatal("short Telegram export did not contain exactly the selected login and password pairs")
+	}
 	s.state.Accounts[1].Game = ""
 	if s.telegramMenu(action).Document != nil {
 		t.Fatal("old confirmation exported a changed selection")
@@ -65,7 +70,7 @@ func TestWebCampaignExportRequiresConfirmationAndKeepsCredentialsOutOfPreview(t 
 	s.state.Games["example"] = &gameState{Name: "Example", Campaigns: map[string]*campaign{
 		"swiss": {ID: "swiss", Name: "Swiss", Results: map[string]string{"player": "idle"}},
 	}}
-	s.state.Accounts = []account{{Game: "example", Credentials: parser.Account{Login: "player", OAuth: "fixture-private-value"}}}
+	s.state.Accounts = []account{{Game: "example", Credentials: parser.Account{Email: "fixture@example.invalid", Login: "player", Password: "fixture-password", OAuth: "fixture-private-value", UserID: "17", DeviceID: "fixture-device"}}}
 	handler, err := webHandler(s)
 	if err != nil {
 		t.Fatal(err)
@@ -96,4 +101,23 @@ func TestWebCampaignExportRequiresConfirmationAndKeepsCredentialsOutOfPreview(t 
 	if err != nil || mediaType != "attachment" || params["filename"] != "Аккаунты — Example — Swiss.txt" || !strings.Contains(res.Body.String(), "fixture-private-value") {
 		t.Fatal("confirmed export did not return the account file")
 	}
+	form.Set("format", "login-password")
+	if res := post(); res.Header().Get("Content-Disposition") != "" {
+		t.Fatal("a confirmation for the full export also authorized a short export")
+	}
+	form.Set("action", "campaign-export")
+	preview = post()
+	fingerprint = regexp.MustCompile(`name="fingerprint" value="([a-f0-9]+)"`).FindStringSubmatch(preview.Body.String())
+	if len(fingerprint) != 2 || strings.Contains(preview.Body.String(), "fixture-password") {
+		t.Fatal("preview is missing confirmation or exposes the password")
+	}
+	form.Set("action", "campaign-export-confirm")
+	form.Set("fingerprint", fingerprint[1])
+	res = post()
+	mediaType, params, err = mime.ParseMediaType(res.Header().Get("Content-Disposition"))
+	if err != nil || mediaType != "attachment" || params["filename"] != "Логины и пароли — Example — Swiss.txt" ||
+		res.Body.String() != "player:fixture-password\n" {
+		t.Fatal("confirmed short web export did not return just login and password")
+	}
+
 }

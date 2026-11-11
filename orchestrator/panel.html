@@ -101,10 +101,10 @@ code { color: #e5c8ff }
 {{with .CampaignExport}}<form class="card stack" method="post">
 <strong>Выгрузка по кампаниям · {{.Name}}</strong>
 <p>Подходящих аккаунтов: {{.Count}}. Файл содержит данные доступа Twitch.</p>
-<p>Условие: {{.ModeLabel}}</p><ul>{{range .Names}}<li>{{.}}</li>{{end}}</ul>
+<p>Условие: {{.ModeLabel}} · Формат: {{.FormatLabel}}</p><ul>{{range .Names}}<li>{{.}}</li>{{end}}</ul>
 <input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="game" value="{{.Game}}"><input type="hidden" name="mode" value="{{.Mode}}">
 {{range .IDs}}<input type="hidden" name="campaign" value="{{.}}">{{end}}
-<input type="hidden" name="fingerprint" value="{{.Fingerprint}}">
+<input type="hidden" name="fingerprint" value="{{.Fingerprint}}"><input type="hidden" name="format" value="{{.Format}}">
 <button name="action" value="campaign-export-confirm">Подтвердить и скачать .txt</button>
 </form>{{end}}
 <p class="notice muted">{{.CatalogStatus}}</p>
@@ -156,6 +156,7 @@ code { color: #e5c8ff }
 <input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="game" value="{{.Key}}">
 <fieldset><legend>Кампании для выгрузки</legend>{{range .Coverage}}<label style="display:block"><input type="checkbox" name="campaign" value="{{.ID}}"> {{.Name}}</label>{{end}}</fieldset>
 <label class="field">Условие<select name="mode"><option value="all">Все выбранные</option><option value="any">Хотя бы одна</option><option value="exact">Только этот набор</option></select></label>
+<label class="field">Формат TXT<select name="format"><option value="full">Полный TXT</option><option value="login-password">Логин:пароль</option></select></label>
 <button class="secondary" name="action" value="campaign-export">Проверить выборку</button>
 </form>{{end}}
 {{else}}<p class="muted">Сохранённых кампаний пока нет.</p>{{end}}
