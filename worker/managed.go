@@ -45,6 +45,7 @@ type ManagedProgress struct {
 	Login                 string
 	Status                string
 	Required, Current     int
+	ProgressKnown         bool
 	RemainingAfterCurrent int
 	Rate                  float64
 	RateKnown             bool
@@ -103,6 +104,7 @@ func (m *Manager) ManagedSnapshot() []ManagedProgress {
 		p := ManagedProgress{Login: login, UserID: s.Account.UserID, Status: s.Status, Required: s.RequiredMinutes, RemainingAfterCurrent: s.remainingAfterCurrent}
 		p.Recovery = s.recoveryStatus.ManagedRecovery
 		if s.ProgressKnown {
+			p.ProgressKnown = true
 			p.Current = s.CurrentMinutes
 		}
 		if s.rateSnapshot.ready {

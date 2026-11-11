@@ -491,6 +491,9 @@ func (s *scheduler) groupSummary(key string, c *campaign, now time.Time) string 
 		running -= remainingActive
 		start = now.Add(max(0, a.groupStarted.Add(duration).Sub(now)))
 		prefix = fmt.Sprintf("Активная группа: %d\nВ очереди: %d", len(c.Group), waiting)
+		if forecast := s.activeGroupETA(key, c, now); forecast != "" {
+			prefix += "\n" + forecast
+		}
 	}
 	if waiting <= 0 {
 		if active {

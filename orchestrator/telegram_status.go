@@ -69,14 +69,49 @@ func (s *scheduler) telegramStatus(now time.Time) string {
 		}
 	}
 	for _, key := range keys[:min(6, len(keys))] {
-		g := s.state.Games[key]
-		fmt.Fprintf(&out, "\n\n• %s\n%s", brief(g.Name, 80), s.queueSummary(key, g, now))
-		if c := g.Campaigns[g.Current]; c != nil && campaignReady(c, now) && s.active[key] != nil {
-			fmt.Fprintf(&out, "\n%s · до %s", brief(c.Name, 75), c.Ends.Local().Format("02.01 15:04"))
-		}
+		fmt.Fprint(&out, "\n\n"+s.telegramGameStatus(key, now))
 	}
 	if len(keys) > 6 {
 		fmt.Fprintf(&out, "\n\nЕщё игр: %d. Полный список — по кнопке «Игры».", len(keys)-6)
 	}
+	return out.String()
+}
+
+func (s *scheduler) telegramGameStatus(key string, now time.Time) string {
+	g := s.state.Games[key]
+	a := s.active[key]
+	summary := s.queueSummary(key, g, now)
+	c := s.queuedCampaign(g, now)
+	if a != nil {
+		c = g.Campaigns[g.Current]
+	}
+	heading := "🎮 " + brief(g.Name, 80)
+	if c == nil || !campaignReady(c, now) || g.Removing || g.Regroup || (a != nil && a.stopping) {
+		return heading + "\n" + summary
+	}
+
+	var out strings.Builder
+	fmt.Fprintf(&out, "%s\n🏆 %s\nДо: %s", heading, brief(c.Name, 85), c.Ends.Local().Format("02.01 в 15:04 MST"))
+	summary = strings.TrimPrefix(summary, "Кампания: "+c.Name+"\n")
+	air := s.airtimeFor(key, c.ID)
+	if air != nil && !air.at.IsZero() {
+		if before, after, found := strings.Cut(summary, air.summary()); found {
+			var lines []string
+			for _, line := range strings.Split(air.status(), "\n") {
+				if strings.HasPrefix(line, "В каталоге категории тоже нет") ||
+					strings.HasPrefix(line, "Поиск продолжится на следующих страницах") {
+					continue
+				}
+				lines = append(lines, line)
+			}
+			if len(air.streams) > 0 {
+				lines = []string{fmt.Sprintf("Эфиров с Drops: %d", len(air.streams))}
+			}
+			summary = before + strings.Join(lines, "\n") + after + "\n🕒 Проверено в " + air.at.Local().Format("15:04 MST")
+		}
+	}
+	summary = strings.Replace(summary, "Активная группа: ", "В группе: ", 1)
+	summary = strings.Replace(summary, "\nВ очереди: ", " · В очереди: ", 1)
+	fmt.Fprint(&out, "\n"+summary)
 	return out.String()
 }

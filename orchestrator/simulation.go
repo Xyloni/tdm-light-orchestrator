@@ -9,7 +9,7 @@ import (
 )
 
 type simulationJob struct {
-	Name                      string
+	Name, Campaign            string
 	Accounts                  int
 	Ready, Deadline, Duration time.Duration
 	Reserve                   time.Duration
@@ -146,7 +146,11 @@ func formatSimulation(jobs []simulationJob, maxGames, maxAccounts int, now time.
 		if r.Job.Economy {
 			mode = "Экономия ресурсов"
 		}
-		fmt.Fprintf(&out, "\n\n🎮 %s\nРежим: %s\nАккаунты: %d", brief(r.Job.Name, 60), mode, r.Job.Accounts)
+		fmt.Fprintf(&out, "\n\n🎮 %s", brief(r.Job.Name, 60))
+		if r.Job.Campaign != "" {
+			fmt.Fprintf(&out, "\nКампания: %s\nКампания до: %s", brief(r.Job.Campaign, 90), now.Add(r.Job.Deadline).Format("02.01 в 15:04 MST"))
+		}
+		fmt.Fprintf(&out, "\nРежим: %s\nАккаунты: %d", mode, r.Job.Accounts)
 		if len(r.Groups) > 0 {
 			var chunks []string
 			for i := 0; i < len(r.Groups) && len(chunks) < 5; {
@@ -246,7 +250,7 @@ func (s *scheduler) previewSchedule(scope, mode string, now time.Time) string {
 		if (one || g.Mode == "") && (mode == "speed" || mode == "resources") {
 			cfg.SaveResources = mode == "resources"
 		}
-		jobs = append(jobs, simulationJob{Name: g.Name, Accounts: accounts, Ready: max(0, c.Starts.Sub(now)), Deadline: c.Ends.Sub(now), Duration: s.duration(g, c), Reserve: time.Duration(cfg.ReserveMinutes) * time.Minute, Economy: cfg.SaveResources})
+		jobs = append(jobs, simulationJob{Name: g.Name, Campaign: c.Name, Accounts: accounts, Ready: max(0, c.Starts.Sub(now)), Deadline: c.Ends.Sub(now), Duration: s.duration(g, c), Reserve: time.Duration(cfg.ReserveMinutes) * time.Minute, Economy: cfg.SaveResources})
 	}
 	if one {
 		found := false

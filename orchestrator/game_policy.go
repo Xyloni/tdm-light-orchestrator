@@ -129,7 +129,7 @@ func (s *scheduler) queueSummary(key string, g *gameState, now time.Time) string
 		}
 	}
 	if !now.Before(s.latestStart(g, c, count)) {
-		message += " Риск дедлайна: по прогнозу запаса в рамках общего лимита уже нет."
+		message += "\n⚠️ Риск дедлайна: по прогнозу запаса в рамках общего лимита уже нет."
 	}
 	return message
 }
