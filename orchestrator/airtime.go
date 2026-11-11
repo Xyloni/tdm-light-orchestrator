@@ -56,7 +56,7 @@ func (a *campaignAirtime) status() string {
 	case a.waitStatus != "":
 		return "⏳ Ожидание эфира кампании.\n" + a.waitStatus
 	case a.total > 0:
-		return fmt.Sprintf("Ожидание эфира кампании. Подходящих среди проверенных каналов: 0 из %d (в списке %d).", a.checked, a.total)
+		return fmt.Sprintf("Ожидание эфира кампании. Проверено по ID кампании: %d. Каналов в каталоге категории: %d.", a.checked, a.total)
 	default:
 		return "Ожидание эфира кампании. Twitch не показал эфиры с Drops в категории."
 	}

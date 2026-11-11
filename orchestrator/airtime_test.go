@@ -27,7 +27,7 @@ func TestCampaignWaitsWithoutAnEligibleStream(t *testing.T) {
 	}
 	s.update(processUpdate{game: "example", process: process, exited: true}, now)
 	s.tick(context.Background(), now)
-	if s.active["example"] != nil || len(c.Group) != 1 || !strings.Contains(s.queueSummary("example", g, now), "0 из 5") {
+	if s.active["example"] != nil || len(c.Group) != 1 || !strings.Contains(s.queueSummary("example", g, now), "Проверено по ID кампании: 5") {
 		t.Fatal("waiting campaign started or lost its group or wait reason")
 	}
 }

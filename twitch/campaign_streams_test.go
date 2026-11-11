@@ -17,6 +17,8 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 	offeredCampaign := "other"
 	detailsUnavailable := false
 	rawSingleOffline := false
+	listedOffline := false
+	directoryOmitsGame := false
 	transport := reviewTransport(func(r *http.Request) (*http.Response, error) {
 		var request struct {
 			OperationName string
@@ -29,6 +31,9 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 		switch request.OperationName {
 		case "DropCampaignDetails":
 			data = `{"user":{"dropCampaign":{"allow":{"isEnabled":true,"channels":[{"name":"live"},{"name":"offline"}]}}}}`
+			if listedOffline {
+				data = `{"user":{"dropCampaign":{"allow":{"isEnabled":true,"channels":[{"name":"offline"}]}}}}`
+			}
 			if detailsUnavailable {
 				data = `{"user":{"dropCampaign":null}}`
 			}
@@ -41,7 +46,10 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 			data = `{"game":{"slug":"game"}}`
 		case "DirectoryPage_Game":
 			data = `{"game":{"streams":{"edges":[{"node":{"id":"2","game":{"id":"3","displayName":"Game"},"broadcaster":{"id":"1","login":"live"}}}]}}}`
-			if request.Variables["includeCostreaming"] == false {
+			if directoryOmitsGame {
+				data = `{"game":{"streams":{"edges":[{"node":{"id":"2","broadcaster":{"id":"1","login":"live"}}}]}}}`
+			}
+			if !directoryOmitsGame && request.Variables["includeCostreaming"] == false {
 				data = `{"game":{"streams":{"edges":[]}}}`
 			}
 		case "VideoPlayerStreamInfoOverlayChannel":
@@ -81,5 +89,16 @@ func TestCampaignStreamsRequiresCampaignIDOnAllowedLiveChannel(t *testing.T) {
 	streams, checked, total, status, err := client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
 	if err != nil || len(streams) != 0 || checked != 1 || total != 1 || !strings.Contains(status, "offline · офлайн") {
 		t.Fatalf("expected a verified offline channel from fallback details: %v %d/%d %q %v", streams, checked, total, status, err)
+	}
+	listedOffline, directoryOmitsGame, detailsUnavailable = true, true, false
+	offeredCampaign = wantCampaign
+	streams, checked, total, _, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
+	if err != nil || checked != 1 || total != 1 || len(streams) != 1 || streams[0].Login != "live" || streams[0].GameID != "3" {
+		t.Fatalf("expected confirmed directory stream with hydrated metadata: %v %d/%d %v", streams, checked, total, err)
+	}
+	offeredCampaign = "other"
+	streams, _, _, status, err = client.CampaignStreams(context.Background(), "Game", wantCampaign, 0)
+	if err != nil || len(streams) != 0 || !strings.Contains(status, "offline · офлайн") || !strings.Contains(status, "найдено каналов: 1") {
+		t.Fatalf("expected an offline listed channel and no matching directory streams: %v %q %v", streams, status, err)
 	}
 }

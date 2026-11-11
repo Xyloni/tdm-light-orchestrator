@@ -45,20 +45,38 @@ func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string
 	}
 	queriedChannels := make(map[string]bool)
 	check := func(stream Stream) {
-		if !strings.EqualFold(stream.Game, game) || stream.GameID == "" || stream.ChannelID == "" || stream.BroadcastID == "" || stream.Login == "" {
+		if stream.ChannelID == "" || stream.BroadcastID == "" || stream.Login == "" ||
+			(stream.Game != "" && !strings.EqualFold(stream.Game, game)) {
 			return
 		}
 		if queriedChannels[stream.ChannelID] {
 			return
 		}
-		queriedChannels[stream.ChannelID] = true
 		ok, lookupErr := c.channelHasCampaign(ctx, stream.ChannelID, campaignID)
 		if lookupErr != nil {
-			delete(queriedChannels, stream.ChannelID)
 			err = errors.New("Twitch не подтвердил кампанию на проверяемых каналах")
-		} else if ok {
-			streams = append(streams, stream)
+			return
 		}
+		queriedChannels[stream.ChannelID] = true
+		if !ok {
+			return
+		}
+		if stream.GameID == "" || stream.Game == "" {
+			metadata, metadataErr := c.StreamMetadata(ctx, stream.Login)
+			if errors.Is(metadataErr, ErrStreamOffline) {
+				return
+			}
+			if metadataErr != nil || metadata.GameID == "" || metadata.Game == "" || metadata.BroadcastID == "" || metadata.ChannelID != stream.ChannelID {
+				delete(queriedChannels, stream.ChannelID)
+				err = errors.New("Twitch не вернул данные подтверждённого эфира кампании")
+				return
+			}
+			if !strings.EqualFold(metadata.Game, game) {
+				return
+			}
+			stream = metadata
+		}
+		streams = append(streams, stream)
 	}
 	if len(allowlist) > 0 {
 		total = len(allowlist)
@@ -89,11 +107,7 @@ func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string
 			status = fmt.Sprintf("В списке кампании %d каналов. Проверено %d, офлайн %d. Подходящий эфир пока не подтверждён.", total, checked, offline)
 		}
 	}
-	if len(allowlist) == 0 || (len(streams) == 0 && err != nil && ctx.Err() == nil) {
-		allowed := make(map[string]bool, len(allowlist))
-		for _, login := range allowlist {
-			allowed[strings.ToLower(login)] = true
-		}
+	if len(streams) == 0 && ctx.Err() == nil {
 		seen := make(map[string]bool)
 		for _, dropsOnly := range []bool{true, false} {
 			if ctx.Err() != nil || len(streams) > 0 {
@@ -111,23 +125,21 @@ func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string
 				if ctx.Err() != nil {
 					break
 				}
-				if len(allowed) > 0 && !allowed[strings.ToLower(stream.Login)] {
-					continue
-				}
-				if len(allowed) == 0 && !seen[stream.Login] {
-					seen[stream.Login] = true
-					total++
-					checked++
-				}
+				seen[stream.Login] = true
 				check(stream)
 			}
+		}
+		if len(allowlist) == 0 {
+			total, checked = len(seen), len(queriedChannels)
+		} else if len(streams) == 0 && len(seen) > 0 {
+			status += fmt.Sprintf("\nВ каталоге категории тоже нет подтверждённых эфиров кампании (найдено каналов: %d).", len(seen))
 		}
 	}
 	if ctx.Err() != nil {
 		err = errors.New("Twitch не ответил в пределах времени проверки эфиров")
 	} else if len(streams) == 0 && err == nil {
 		if detailsErr != nil {
-			err = fmt.Errorf("Список каналов кампании недоступен. В каталоге категории найдено %d каналов, на %d проверен ID кампании, совпадений нет", total, len(queriedChannels))
+			err = fmt.Errorf("Список каналов кампании недоступен. Каналов в каталоге категории: %d. Проверок по ID кампании: %d. Подходящий эфир не найден", total, checked)
 		}
 	}
 	return
