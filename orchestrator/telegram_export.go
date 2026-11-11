@@ -65,7 +65,7 @@ func (s *scheduler) telegramExport(kind, value string) bot.SettingsPanel {
 		panel.Text = "Не удалось собрать файл. " + err.Error() + ". Операция отменена."
 		return panel
 	}
-	doc := &bot.TelegramDocument{Name: "accounts-" + ref + ".txt", Data: content}
+	doc := &bot.TelegramDocument{Name: accountExportName(label), Data: content}
 	if kind == "export-clear-confirm" || kind == "export-remove-confirm" {
 		doc.AfterSend = func() string {
 			s.mu.Lock()

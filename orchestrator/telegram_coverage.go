@@ -119,7 +119,13 @@ func (s *scheduler) telegramCoveragePanel(kind, value string) bot.SettingsPanel 
 		} else if arg != campaignExportFingerprint(data) {
 			panel.Text = "Состав выборки изменился. Проверьте новый результат перед выгрузкой."
 		} else {
-			panel.Document = &bot.TelegramDocument{Name: "accounts-campaigns-" + ref + ".txt", Data: data}
+			var names []string
+			for _, c := range coverage.Campaigns {
+				if slices.Contains(selection.ids, c.ID) {
+					names = append(names, c.Name)
+				}
+			}
+			panel.Document = &bot.TelegramDocument{Name: accountExportName(game.Name, names...), Data: data}
 			row("К кампаниям", "cov:"+ref)
 			return panel
 		}

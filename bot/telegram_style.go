@@ -203,7 +203,7 @@ func telegramButton(action, label string) string {
 	default:
 		icon = map[string]string{
 			"status": "📡", "stats": "📊", "game-stats": "📊", "games": "🎮", "game": "🎮", "find-choice": "🎮",
-			"accounts": "👥", "game-pool": "👥", "game-options": "⚙️", "assign": "📌", "free": "📤", "target": "🎯", "upload": "📎",
+			"accounts": "👥", "game-pool": "👥", "game-options": "⚙️", "farm-campaign": "🎯", "assign": "📌", "free": "📤", "target": "🎯", "upload": "📎",
 			"settings": "⚙️", "miner-options": "⚙️", "policy": "⚙️", "notifications": "🔔", "digest": "🕘",
 			"help": "📖", "menu": "🏠", "resume": "▶️", "stop": "⏸️", "restart": "🔄", "report": "📋",
 			"system-load": "🖥", "lagging": "📊", "game-lagging": "📊", "lagging-details": "👥", "game-lagging-details": "👥", "quarantine": "🛡️", "game-quarantine": "🛡️", "speed": "🔁", "resources": "🔁", "limits": "🎚️",

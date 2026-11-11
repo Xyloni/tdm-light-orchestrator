@@ -17,6 +17,7 @@ type campaignAirtime struct {
 	at, next       time.Time
 	checking       bool
 	offset         int
+	directory      twitch.CampaignDirectoryCursor
 	attempt        int
 	checked, total int
 	streams        []twitch.Stream
@@ -112,12 +113,13 @@ func (s *scheduler) checkCampaignAirtime(ctx context.Context, key string, g *gam
 	s.airtimeChecks++
 	cfg := s.miner
 	game, campaignID, campaignName, offset := g.Name, c.ID, c.Name, air.offset
+	directory := air.directory
 	go func() {
 		checkCtx, cancel := context.WithTimeout(ctx, airtimeTimeout)
 		defer cancel()
 		client := &http.Client{Timeout: airtimeTimeout}
 		defer client.CloseIdleConnections()
-		streams, checked, total, waitStatus, err := twitch.NewGQLClient(client, &cfg, &credentials).CampaignStreams(checkCtx, game, campaignID, offset)
+		streams, checked, total, waitStatus, err := twitch.NewGQLClient(client, &cfg, &credentials).CampaignStreams(checkCtx, game, campaignID, offset, &directory)
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.airtimeChecks--
@@ -136,6 +138,7 @@ func (s *scheduler) checkCampaignAirtime(ctx context.Context, key string, g *gam
 		}
 		air.streams, air.checked, air.total = streams, checked, total
 		air.waitStatus = waitStatus
+		air.directory = directory
 		if len(streams) == 0 && err != nil {
 			air.failures++
 		} else {

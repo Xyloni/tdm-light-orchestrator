@@ -98,6 +98,8 @@ func (s *scheduler) operate(action, rest string) string {
 		return s.changeExclusion(strings.ToLower(strings.TrimSpace(game)), name, action == "exclude")
 	case "exclusions":
 		return s.exclusionList(strings.ToLower(rest))
+	case "farm_campaign":
+		return s.campaignSelectionCommand(rest, time.Now())
 	case "game_policy":
 		game, values, ok := strings.Cut(rest, "|")
 		fields := strings.Fields(values)

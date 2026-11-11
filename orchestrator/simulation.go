@@ -217,13 +217,10 @@ func (s *scheduler) previewSchedule(scope, mode string, now time.Time) string {
 			}
 			continue
 		}
-		c := g.Campaigns[g.Current]
-		if c == nil || !campaignReady(c, now) {
-			c = s.nextCampaign(g, now)
-		}
+		c := s.queuedCampaign(g, now)
 		if c == nil {
 			for _, candidate := range g.Campaigns {
-				if candidate.Finished == "" && !allRewardsExcluded(candidate) && candidate.Starts.After(now) &&
+				if (g.SelectedCampaign == "" || candidate.ID == g.SelectedCampaign) && candidate.Finished == "" && !allRewardsExcluded(candidate) && candidate.Starts.After(now) &&
 					(c == nil || candidate.Starts.Before(c.Starts)) {
 					c = candidate
 				}

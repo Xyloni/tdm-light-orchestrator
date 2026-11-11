@@ -8,9 +8,13 @@ import (
 	"strings"
 )
 
+type CampaignDirectoryCursor struct {
+	drops, all string
+}
+
 // CampaignStreams checks this campaign's presence on each candidate channel.
 // offset rotates through large creator allowlists between polls.
-func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string, offset int) (streams []Stream, checked, total int, status string, err error) {
+func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string, offset int, directory *CampaignDirectoryCursor) (streams []Stream, checked, total int, status string, err error) {
 	type campaignUser struct {
 		DropCampaign *struct {
 			Allow *struct {
@@ -109,15 +113,23 @@ func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string
 	}
 	if len(streams) == 0 && ctx.Err() == nil {
 		seen := make(map[string]bool)
-		for _, dropsOnly := range []bool{true, false} {
+		if directory == nil {
+			directory = &CampaignDirectoryCursor{}
+		}
+		for _, page := range []struct {
+			dropsOnly bool
+			cursor    *string
+		}{{true, &directory.drops}, {false, &directory.all}} {
 			if ctx.Err() != nil || len(streams) > 0 {
 				break
 			}
-			candidates, directoryErr := c.categoryStreams(ctx, game, dropsOnly)
+			candidates, next, directoryErr := c.categoryStreams(ctx, game, page.dropsOnly, *page.cursor)
 			if errors.Is(directoryErr, ErrNoDropsStreams) {
+				*page.cursor = next
 				continue
 			}
 			if directoryErr != nil {
+				*page.cursor = ""
 				err = errors.New("Twitch не вернул каталог эфиров категории")
 				continue
 			}
@@ -128,11 +140,20 @@ func (c *GQLClient) CampaignStreams(ctx context.Context, game, campaignID string
 				seen[stream.Login] = true
 				check(stream)
 			}
+			if len(streams) == 0 && ctx.Err() == nil {
+				*page.cursor = next
+			}
 		}
 		if len(allowlist) == 0 {
 			total, checked = len(seen), len(queriedChannels)
 		} else if len(streams) == 0 && len(seen) > 0 {
 			status += fmt.Sprintf("\nВ каталоге категории тоже нет подтверждённых эфиров кампании (найдено каналов: %d).", len(seen))
+		}
+		if len(streams) == 0 && (directory.drops != "" || directory.all != "") {
+			if status == "" && len(allowlist) == 0 {
+				status = fmt.Sprintf("Проверено по ID кампании: %d. Каналов на просмотренных страницах: %d.", checked, total)
+			}
+			status += "\nПоиск продолжится на следующих страницах каталога."
 		}
 	}
 	if ctx.Err() != nil {

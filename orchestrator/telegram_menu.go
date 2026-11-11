@@ -26,6 +26,8 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 	}
 	kind, exportValue, _ := strings.Cut(action, ":")
 	switch kind {
+	case "farm-campaign", "farm-pick":
+		return s.telegramCampaignSelection(kind, exportValue)
 	case "cov", "cov-sets", "cov-export", "cov-toggle", "cov-mode", "cov-page", "cov-confirm":
 		return s.telegramCoveragePanel(kind, exportValue)
 	case "help", "help-commands":
@@ -203,9 +205,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		}
 	default:
 		if value, ok := strings.CutPrefix(action, "find-choice:"); ok {
-			panel.Text = s.telegramSelectGame(value)
-			row(button("К списку игр", "games"))
-			return panel
+			return s.telegramSelectGame(value)
 		}
 		if value, ok := strings.CutPrefix(action, "miner-option:"); ok {
 			key, setting, _ := strings.Cut(value, ":")
@@ -356,6 +356,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 					}
 				}
 				if !g.Removing {
+					row(button("Кампания для фарма", "farm-campaign:"+value))
 					row(button("Пул аккаунтов", "game-pool:"+value), button("Настройки игры", "game-options:"+value))
 					row(button("Статистика", "game-stats:"+value), button("История кампаний", "report:"+value))
 					row(button("🏆 Кампании в пуле", "cov:"+value))

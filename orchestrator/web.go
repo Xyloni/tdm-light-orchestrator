@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -27,10 +28,17 @@ type panelGame struct {
 	ReserveMinutes                              int
 	Key, Name, Errors, GroupSummary             string
 	ExcludedRewards                             []string
+	SelectedCampaign                            string
+	CampaignOptions                             []campaignOption
 	Coverage                                    []coverageCampaign
 	CoverageSets                                []coverageSet
 	Accounts, Target, Deficit                   int
 	Active, Removing, Paused, Stopping, Regroup bool
+}
+
+type campaignOption struct {
+	ID, Name string
+	Starts   time.Time
 }
 
 type notificationView struct {
@@ -143,10 +151,15 @@ func (s *scheduler) panel(token, message string, showConfirm bool) panelData {
 		a := s.active[key]
 		stopping := a != nil && a.stopping
 		policy := s.gameSettings(g)
+		var options []campaignOption
+		for _, c := range selectableCampaigns(g, now) {
+			options = append(options, campaignOption{c.ID, c.Name, c.Starts})
+		}
 		view.Games = append(view.Games, panelGame{
 			Mode: g.Mode, ReserveMinutes: g.ReserveMinutes, PolicyLabel: policy.modeName() + " · запас " + strconv.Itoa(policy.ReserveMinutes) + " мин",
 			Report: s.campaignReport(g), Quarantine: s.quarantineSummary(key),
 			Coverage: coverage.Campaigns, CoverageSets: coverage.Sets,
+			SelectedCampaign: g.SelectedCampaign, CampaignOptions: options,
 			Key: key, Name: g.Name, Accounts: counts[key], Target: g.Target, Deficit: max(0, g.Target-counts[key]),
 			Active: a != nil, Removing: g.Removing, Paused: g.Paused, Stopping: stopping, Regroup: g.Regroup, Errors: s.accountErrors(key), GroupSummary: groupSummary, ExcludedRewards: append([]string(nil), g.ExcludedRewards...),
 		})
@@ -175,6 +188,10 @@ func (s *scheduler) panelAction(form url.Values) string {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		return s.requestGameRemoval(strings.ToLower(game), form.Get("disposition"), form.Get("confirm") == "on")
+	case "farm-campaign":
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.changeCampaignSelection(strings.ToLower(game), form.Get("campaign"), time.Now())
 	case "game-policy":
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -313,7 +330,7 @@ func webHandler(s *scheduler) (http.Handler, error) {
 					campaignExport = &preview
 				default:
 					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-					w.Header().Set("Content-Disposition", `attachment; filename="accounts-campaigns.txt"`)
+					w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": accountExportName(preview.Name, preview.Names...)}))
 					w.Header().Set("Cache-Control", "no-store")
 					w.Header().Set("X-Content-Type-Options", "nosniff")
 					_, _ = w.Write(data)

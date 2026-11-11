@@ -219,7 +219,7 @@ func campaignReady(c *campaign, now time.Time) bool {
 
 func hasUpcoming(g *gameState, now time.Time) bool {
 	for _, c := range g.Campaigns {
-		if c.Finished == "" && now.Before(c.Ends) {
+		if (g.SelectedCampaign == "" || c.ID == g.SelectedCampaign) && c.Finished == "" && now.Before(c.Ends) {
 			return true
 		}
 	}
@@ -229,7 +229,7 @@ func hasUpcoming(g *gameState, now time.Time) bool {
 func (s *scheduler) nextCampaign(g *gameState, now time.Time) *campaign {
 	var best *campaign
 	for _, c := range g.Campaigns {
-		if !campaignReady(c, now) {
+		if (g.SelectedCampaign != "" && c.ID != g.SelectedCampaign) || !campaignReady(c, now) {
 			continue
 		}
 		if best == nil || s.less(g, c, g, best) {
@@ -237,6 +237,13 @@ func (s *scheduler) nextCampaign(g *gameState, now time.Time) *campaign {
 		}
 	}
 	return best
+}
+
+func (s *scheduler) queuedCampaign(g *gameState, now time.Time) *campaign {
+	if c := g.Campaigns[g.Current]; g.SelectedCampaign == "" && c != nil && campaignReady(c, now) {
+		return c
+	}
+	return s.nextCampaign(g, now)
 }
 
 func (s *scheduler) latestStart(g *gameState, c *campaign, target int) time.Time {
@@ -462,10 +469,7 @@ func (s *scheduler) tick(ctx context.Context, now time.Time) {
 		if g.Removing || g.Paused || g.Regroup || s.active[key] != nil || now.Before(s.retry[key]) {
 			continue
 		}
-		c := g.Campaigns[g.Current]
-		if c == nil || !campaignReady(c, now) {
-			c = s.nextCampaign(g, now)
-		}
+		c := s.queuedCampaign(g, now)
 		if c != nil {
 			candidates = append(candidates, candidate{key, c, g.SeriesPaused || g.Current != ""})
 		}

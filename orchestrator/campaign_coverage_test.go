@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -49,7 +50,7 @@ func TestCampaignCoverageAndConfirmedTelegramExport(t *testing.T) {
 	if !strings.HasPrefix(action, "cov-confirm:") || len("control:"+action) > 64 {
 		t.Fatalf("unexpected confirm action %q", action)
 	}
-	if file := s.telegramMenu(action).Document; file == nil || strings.Contains(string(file.Data), ":ready:") ||
+	if file := s.telegramMenu(action).Document; file == nil || !strings.Contains(file.Name, "Example") || strings.Contains(string(file.Data), ":ready:") ||
 		!strings.Contains(string(file.Data), ":legacy:") || !strings.Contains(string(file.Data), ":claimed:") {
 		t.Fatal("exact export included the wrong set")
 	}
@@ -91,7 +92,8 @@ func TestWebCampaignExportRequiresConfirmationAndKeepsCredentialsOutOfPreview(t 
 	form.Set("action", "campaign-export-confirm")
 	form.Set("fingerprint", fingerprint[1])
 	res := post()
-	if !strings.Contains(res.Header().Get("Content-Disposition"), "attachment") || !strings.Contains(res.Body.String(), "fixture-private-value") {
+	mediaType, params, err := mime.ParseMediaType(res.Header().Get("Content-Disposition"))
+	if err != nil || mediaType != "attachment" || params["filename"] != "Аккаунты — Example — Swiss.txt" || !strings.Contains(res.Body.String(), "fixture-private-value") {
 		t.Fatal("confirmed export did not return the account file")
 	}
 }

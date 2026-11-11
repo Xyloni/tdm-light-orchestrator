@@ -139,6 +139,14 @@ code { color: #e5c8ff }
 <article class="game"><div class="game-head"><h3>{{.Name}}</h3><span class="tag">{{if .Removing}}Удаляется{{else if .Regroup}}Перегруппировка{{else if .Paused}}На паузе{{else if .Stopping}}Перезапускается{{else if .Active}}В работе{{else}}Ожидает{{end}}</span></div>
 <p class="muted">В пуле {{.Accounts}} из {{.Target}}{{if .Deficit}} · не хватает {{.Deficit}}{{end}}</p>
 {{if .GroupSummary}}<p class="group-summary">{{.GroupSummary}}</p>{{end}}
+{{if not .Removing}}
+<form class="stack" method="post">
+<input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="action" value="farm-campaign"><input type="hidden" name="game" value="{{.Key}}">
+{{$selected := .SelectedCampaign}}
+<label class="field">Кампания для фарма<select name="campaign"><option value="">Авто</option>{{range .CampaignOptions}}<option value="{{.ID}}" {{if eq .ID $selected}}selected{{end}}>{{.Name}} · {{.Starts.Local.Format "02.01"}}</option>{{end}}</select></label>
+<button class="secondary">Сохранить выбор кампании</button>
+</form>
+{{end}}
 <details><summary>🏆 Кампании в пуле</summary>
 {{if .Coverage}}
 {{$poolSize := .Accounts}}

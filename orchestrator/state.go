@@ -35,18 +35,19 @@ type account struct {
 }
 
 type gameState struct {
-	Mode            string
-	ReserveMinutes  int
-	ExcludedRewards []string
-	Removing        bool
-	DeleteAccounts  bool
-	Paused          bool
-	Regroup         bool
-	Name            string
-	Target          int
-	Current         string
-	SeriesPaused    bool
-	Campaigns       map[string]*campaign
+	Mode             string
+	ReserveMinutes   int
+	ExcludedRewards  []string
+	Removing         bool
+	DeleteAccounts   bool
+	Paused           bool
+	Regroup          bool
+	Name             string
+	Target           int
+	Current          string
+	SelectedCampaign string
+	SeriesPaused     bool
+	Campaigns        map[string]*campaign
 }
 
 type campaign struct {

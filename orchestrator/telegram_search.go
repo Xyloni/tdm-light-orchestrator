@@ -50,16 +50,31 @@ func (s *scheduler) telegramFindGame(input string) bot.SettingsPanel {
 	return panel
 }
 
-func (s *scheduler) telegramSelectGame(value string) string {
+func (s *scheduler) telegramSelectGame(value string) bot.SettingsPanel {
 	id, index, _ := strings.Cut(value, ":")
 	position, err := strconv.Atoi(index)
 	s.mu.Lock()
 	result := s.telegramSearch
 	if err != nil || position < 0 || position >= len(result.Names) || id != result.ID || !time.Now().Before(result.Expires) {
 		s.mu.Unlock()
-		return "Результаты поиска устарели. Найдите игру заново."
+		return bot.SettingsPanel{Text: "Результаты поиска устарели. Найдите игру заново.", Buttons: [][]bot.SettingsButton{{{Label: "К списку игр", Action: "games"}}}}
 	}
 	s.telegramSearch = telegramSearchResult{}
 	s.mu.Unlock()
-	return s.operate("add", strconv.Itoa(result.Target)+" "+result.Names[position])
+	return s.telegramAddGame(strconv.Itoa(result.Target) + " " + result.Names[position])
+}
+
+func (s *scheduler) telegramAddGame(input string) bot.SettingsPanel {
+	message := s.operate("add", input)
+	_, name, _ := strings.Cut(input, " ")
+	key := strings.ToLower(strings.TrimSpace(name))
+	s.mu.Lock()
+	exists := s.state.Games[key] != nil
+	s.mu.Unlock()
+	if !exists {
+		return bot.SettingsPanel{Text: message, Buttons: [][]bot.SettingsButton{{{Label: "К списку игр", Action: "games"}}}}
+	}
+	panel := s.telegramCampaignSelection("farm-campaign", gameRef(key))
+	panel.Text = message + "\n\n" + panel.Text
+	return panel
 }

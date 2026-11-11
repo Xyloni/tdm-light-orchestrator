@@ -357,10 +357,11 @@ func (c *GQLClient) StreamMetadata(ctx context.Context, login string) (Stream, e
 
 // TopStreams — онлайн-стримы игры (предпочтительно с включёнными Drops).
 func (c *GQLClient) TopStreams(ctx context.Context, gameName string, _ int) ([]Stream, error) {
-	return c.categoryStreams(ctx, gameName, true)
+	streams, _, err := c.categoryStreams(ctx, gameName, true, "")
+	return streams, err
 }
 
-func (c *GQLClient) categoryStreams(ctx context.Context, gameName string, dropsOnly bool) ([]Stream, error) {
+func (c *GQLClient) categoryStreams(ctx context.Context, gameName string, dropsOnly bool, cursor string) ([]Stream, string, error) {
 	const gameSlugQuery = `query GameSlug($name: String!) { game(name: $name) { slug } }`
 	const directoryHash = "cb5dc816e139dcb8a118f14b4b677d59abc224a4b016c4bc2bb00a47fe0ddec4"
 	var slugData struct {
@@ -369,16 +370,18 @@ func (c *GQLClient) categoryStreams(ctx context.Context, gameName string, dropsO
 		} `json:"game"`
 	}
 	if err := c.do(ctx, "GameSlug", gameSlugQuery, map[string]any{"name": gameName}, &slugData); err != nil {
-		return nil, fmt.Errorf("категория Twitch %q: %w", gameName, err)
+		return nil, "", fmt.Errorf("категория Twitch %q: %w", gameName, err)
 	}
 	if slugData.Game == nil || slugData.Game.Slug == "" {
-		return nil, fmt.Errorf("категория Twitch %q не найдена", gameName)
+		return nil, "", fmt.Errorf("категория Twitch %q не найдена", gameName)
 	}
 	var data struct {
 		Game *struct {
 			Streams struct {
-				Edges []struct {
-					Node *struct {
+				PageInfo struct{ HasNextPage bool }
+				Edges    []struct {
+					Cursor string
+					Node   *struct {
 						ID   string `json:"id"`
 						Game *struct {
 							ID          string `json:"id"`
@@ -410,19 +413,22 @@ func (c *GQLClient) categoryStreams(ctx context.Context, gameName string, dropsO
 			"tags": []string{}, "requestID": "JIRA-VXP-2397",
 		},
 	}
+	if cursor != "" {
+		vars["cursor"] = cursor
+	}
 	payload, err := json.Marshal(map[string]any{
 		"operationName": "DirectoryPage_Game",
 		"variables":     vars,
 		"extensions":    map[string]any{"persistedQuery": map[string]any{"version": 1, "sha256Hash": directoryHash}},
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := c.doPayload(ctx, "DirectoryPage_Game", payload, &data); err != nil {
-		return nil, fmt.Errorf("список Drops-стримов для %q: %w", gameName, err)
+		return nil, "", fmt.Errorf("список Drops-стримов для %q: %w", gameName, err)
 	}
 	if data.Game == nil {
-		return nil, fmt.Errorf("Twitch вернул пустую категорию для %q", gameName)
+		return nil, "", fmt.Errorf("Twitch вернул пустую категорию для %q", gameName)
 	}
 	var out []Stream
 	for _, e := range data.Game.Streams.Edges {
@@ -439,10 +445,16 @@ func (c *GQLClient) categoryStreams(ctx context.Context, gameName string, dropsO
 			BroadcastID: e.Node.ID, GameID: gameID, Game: gameDisplay,
 		})
 	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("%w: %q (slug %q, записей %d)", ErrNoDropsStreams, gameName, slugData.Game.Slug, len(data.Game.Streams.Edges))
+	next := ""
+	if edges := data.Game.Streams.Edges; data.Game.Streams.PageInfo.HasNextPage && len(edges) > 0 {
+		if last := edges[len(edges)-1].Cursor; last != cursor {
+			next = last
+		}
 	}
-	return out, nil
+	if len(out) == 0 {
+		return nil, next, fmt.Errorf("%w: %q (slug %q, записей %d)", ErrNoDropsStreams, gameName, slugData.Game.Slug, len(data.Game.Streams.Edges))
+	}
+	return out, next, nil
 }
 
 // PlaybackAccessToken — токен и подпись для доступа к плейлистам канала.

@@ -132,7 +132,9 @@ func (s *scheduler) telegramInput(input, text string) bot.SettingsPanel {
 		return s.telegramFindGame(text)
 	case "upload":
 		return retry("Прикрепите файл как документ.")
-	case "add", "limits", "timing", "digest", "simulate", "assign", "free":
+	case "add":
+		return s.telegramAddGame(text)
+	case "limits", "timing", "digest", "simulate", "assign", "free":
 		message = s.operate(kind, text)
 	case "target", "exclude", "include", "policy":
 		s.mu.Lock()

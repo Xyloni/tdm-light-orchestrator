@@ -51,10 +51,20 @@ func (s *scheduler) queueSummary(key string, g *gameState, now time.Time) string
 		return "Ожидание: остановка предыдущего процесса."
 	}
 	c := g.Campaigns[g.Current]
-	if a == nil && (c == nil || !campaignReady(c, now)) {
-		c = s.nextCampaign(g, now)
+	if a == nil {
+		c = s.queuedCampaign(g, now)
 	}
 	if c == nil || !campaignReady(c, now) {
+		if g.SelectedCampaign != "" {
+			selected := g.Campaigns[g.SelectedCampaign]
+			if selected == nil {
+				return "Ожидание: выбранная кампания пока недоступна."
+			}
+			if selected.Starts.After(now) && selected.Finished == "" {
+				return fmt.Sprintf("Кампания: %s\nОжидание старта: %s.", selected.Name, selected.Starts.Local().Format("02.01 15:04 MST"))
+			}
+			return fmt.Sprintf("Кампания: %s\nКампания завершилась или сейчас недоступна. Выберите другую или включите «Авто».", selected.Name)
+		}
 		var next time.Time
 		excluded := false
 		for _, item := range g.Campaigns {
@@ -104,7 +114,7 @@ func (s *scheduler) queueSummary(key string, g *gameState, now time.Time) string
 	air := s.airtimeFor(key, c.ID)
 	message := "Готова к запуску."
 	if air == nil || len(air.streams) == 0 {
-		message = air.summary()
+		message = fmt.Sprintf("Кампания: %s\n%s", c.Name, air.summary())
 	} else if now.Before(s.retry[key]) {
 		message = "Ожидание: повтор запуска майнера."
 	} else if a == nil && len(s.active) >= s.state.Settings.MaxGames {

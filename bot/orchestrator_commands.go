@@ -10,6 +10,7 @@ type orchestratorCommand struct {
 var orchestratorCommands = []orchestratorCommand{
 	{"quarantine", "quarantine", "Аккаунты в карантине", "game", "Оставьте пустым для всех игр или укажите игру", false},
 	{"campaign_report", "campaign_report", "История кампаний игры", "game", "Полное название игры", true},
+	{"farm_campaign", "farm_campaign", "Посмотреть или выбрать кампанию для фарма", "details", "Игра или Игра | ID кампании либо auto", true},
 	{"game_policy", "game_policy", "Правила группировки и запас отдельной игры", "details", "Игра | режим (default, speed, resources) и запас (0 = общий)", true},
 	{"help", "help", "Справка по командам", "topic", "games, accounts, settings или load", false},
 	{"preview_schedule", "preview", "Предпросмотр расписания по игре или всем играм", "details", "all или название игры, затем необязательно | speed или | resources", true},
