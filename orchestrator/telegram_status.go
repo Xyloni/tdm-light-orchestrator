@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+// withoutActiveCampaign is used by both Telegram status lists while s.mu is held.
+func (s *scheduler) withoutActiveCampaign(key string, g *gameState, now time.Time) bool {
+	return !g.Paused && !g.Removing && !g.Regroup && s.active[key] == nil && s.queuedCampaign(g, now) == nil
+}
+
 func (s *scheduler) telegramStatus(now time.Time) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -45,7 +50,7 @@ func (s *scheduler) telegramStatus(now time.Time) string {
 	fmt.Fprint(&out, "\n\n🎮 Игры")
 	keys := make([]string, 0, len(s.state.Games))
 	for key, g := range s.state.Games {
-		if !g.Paused || g.Removing {
+		if (!g.Paused || g.Removing) && !s.withoutActiveCampaign(key, g, now) {
 			keys = append(keys, key)
 		}
 	}
@@ -60,7 +65,7 @@ func (s *scheduler) telegramStatus(now time.Time) string {
 		if len(s.state.Games) == 0 {
 			fmt.Fprint(&out, "\nИгр пока нет. Добавьте игру в разделе «Игры».")
 		} else {
-			fmt.Fprint(&out, "\nВсе игры на ручной паузе.")
+			fmt.Fprint(&out, "\nИгры на паузе и без активной кампании доступны по отдельным кнопкам.")
 		}
 	}
 	for _, key := range keys[:min(6, len(keys))] {

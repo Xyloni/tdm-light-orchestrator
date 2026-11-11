@@ -172,7 +172,8 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		panel.Text = s.telegramStatus(time.Now())
 		row(button("Обновить", "status"), button("Темп начисления", "lagging"))
 		row(button("Игры", "games"), button("Статистика", "stats"))
-		row(button("Игры на паузе", "paused-games"), button("До дедлайна", "deadline"))
+		row(button("Игры на паузе", "paused-games"), button("Без кампании", "no-campaign-games"))
+		row(button("До дедлайна", "deadline"))
 	case "settings", "speed", "resources", "trim", "trim-confirm":
 		if input, text, ok := strings.Cut(action, "\n"); ok {
 			return s.telegramInput(input, text)
@@ -236,11 +237,12 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		defer s.mu.Unlock()
 		kind, value, _ := strings.Cut(action, ":")
 		switch kind {
-		case "games", "paused-games":
-			pausedOnly := kind == "paused-games"
+		case "games", "paused-games", "no-campaign-games":
+			now := time.Now()
 			keys := make([]string, 0, len(s.state.Games))
 			for key, g := range s.state.Games {
-				if !pausedOnly || (g.Paused && !g.Removing) {
+				if kind == "games" || (kind == "paused-games" && g.Paused && !g.Removing) ||
+					(kind == "no-campaign-games" && s.withoutActiveCampaign(key, g, now)) {
 					keys = append(keys, key)
 				}
 			}
@@ -248,11 +250,16 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 			page, _ := strconv.Atoi(value)
 			page = max(0, min(page, max(0, len(keys)-1)/8))
 			panel.Text = fmt.Sprintf("Игр в списке: %d\n\nВыберите игру, чтобы открыть её состояние и действия.", len(keys))
-			if pausedOnly {
+			switch kind {
+			case "paused-games":
 				if len(keys) == 0 {
 					panel.Text = "Игр на ручной паузе нет."
 				}
-			} else {
+			case "no-campaign-games":
+				if len(keys) == 0 {
+					panel.Text = "Игр без активной кампании нет."
+				}
+			case "games":
 				row(button("Найти игру в Twitch", "prompt:find"), button("Ввести точное название", "prompt:add"))
 				if len(keys) == 0 {
 					panel.Text = "Игры ещё не добавлены."
@@ -267,7 +274,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 			if (page+1)*8 < len(keys) {
 				row(button("Следующие", fmt.Sprintf("%s:%d", kind, page+1)))
 			}
-			if pausedOnly {
+			if kind != "games" {
 				row(button("Статус фарма", "status"))
 			}
 		case "game", "game-pool", "game-options", "stop", "resume", "restart", "regroup", "regroup-confirm", "remove", "remove-release-confirm", "remove-delete-confirm", "clear-game", "clear-release-confirm", "clear-delete-confirm", "report", "game-quarantine", "game-stats", "game-lagging", "game-lagging-details", "game-preview", "game-preview-speed", "game-preview-resources":

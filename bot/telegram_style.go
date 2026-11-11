@@ -22,6 +22,8 @@ func telegramPanelTitle(action string) string {
 		return "👥 Темп по аккаунтам"
 	case kind == "stats" || kind == "game-stats":
 		return "📊 Статистика фарма"
+	case kind == "no-campaign-games":
+		return "🗓 Игры без активной кампании"
 	case kind == "paused-games":
 		return "⏸ Игры на паузе"
 	case kind == "games" || kind == "find-choice":
@@ -204,7 +206,7 @@ func telegramButton(action, label string) string {
 		icon = "🗑️"
 	default:
 		icon = map[string]string{
-			"status": "📡", "stats": "📊", "game-stats": "📊", "games": "🎮", "paused-games": "⏸", "game": "🎮", "find-choice": "🎮",
+			"status": "📡", "stats": "📊", "game-stats": "📊", "games": "🎮", "paused-games": "⏸", "no-campaign-games": "🗓", "game": "🎮", "find-choice": "🎮",
 			"accounts": "👥", "game-pool": "👥", "game-options": "⚙️", "farm-campaign": "🎯", "assign": "📌", "free": "📤", "target": "🎯", "upload": "📎",
 			"settings": "⚙️", "miner-options": "⚙️", "policy": "⚙️", "notifications": "🔔", "digest": "🕘",
 			"help": "📖", "menu": "🏠", "resume": "▶️", "stop": "⏸️", "restart": "🔄", "report": "📋",
