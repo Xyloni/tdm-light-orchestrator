@@ -41,6 +41,9 @@ func (s *AccountState) recordRewardProgressLocked(drop twitch.Drop, ready bool) 
 	item.Ready = item.Ready || ready
 	item.Earned = item.Earned || earned
 	item.Claimed = item.Claimed || drop.IsClaimed
+	if item.Claimed {
+		item.ClaimError = ""
+	}
 	s.rewardProgress[drop.ID] = item
 }
 

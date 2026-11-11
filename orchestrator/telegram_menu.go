@@ -26,6 +26,8 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 	}
 	kind, exportValue, _ := strings.Cut(action, ":")
 	switch kind {
+	case "game-claims", "claim-scan-confirm":
+		return s.telegramClaims(kind, exportValue)
 	case "partial-confirm":
 		return s.confirmPartialExport(exportValue, time.Now())
 	case "deadline", "deadline-game":
@@ -410,7 +412,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 					}
 				}
 				if !g.Removing {
-					row(button("Кампания для фарма", "farm-campaign:"+value))
+					row(button("Кампания для фарма", "farm-campaign:"+value), button("🎁 Получение Drops", "game-claims:"+value))
 					row(button("Пул аккаунтов", "game-pool:"+value), button("Настройки игры", "game-options:"+value))
 					row(button("Статистика", "game-stats:"+value), button("История кампаний", "report:"+value))
 					row(button("🏆 Кампании в пуле", "cov:"+value))

@@ -32,6 +32,7 @@ func (m *Manager) allowsStream(stream twitch.Stream) bool {
 }
 
 type ManagedRewardProgress struct {
+	ClaimError      string
 	Name            string
 	ID              string
 	First, Minutes  int

@@ -54,6 +54,7 @@ func runOnce(parent context.Context, dir, address string) error {
 		updates: make(chan processUpdate, 128), catalogs: make(chan discoveryResult, 1),
 		retry: make(map[string]time.Time), botChanges: make(chan struct{}, 1),
 		restartRequests: make(chan struct{}, 1),
+		claimCtx:        ctx,
 	}
 	host, _, err := net.SplitHostPort(address)
 	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
@@ -153,6 +154,8 @@ loop:
 		s.mu.Unlock()
 	}
 	cancel()
+	s.mu.Lock()
+	s.mu.Unlock()
 	if errors.Is(stopReason, errRestartRequested) {
 		shutdownCtx, stopShutdown := context.WithTimeout(context.Background(), 25*time.Second)
 		defer stopShutdown()

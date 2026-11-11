@@ -20,6 +20,7 @@ func (t *totals) add(other totals) {
 }
 
 type rewardWatermark struct {
+	ClaimError      string `json:",omitempty"`
 	Minutes         int
 	Known, Ready    bool
 	Earned, Claimed bool
@@ -81,6 +82,11 @@ func (s *statistics) recordProgress(game, campaign string, items []worker.Manage
 			next := previous
 			next.Earned = previous.Earned || sample.Earned || sample.Ready || sample.Claimed
 			next.Claimed = previous.Claimed || sample.Claimed
+			if next.Claimed {
+				next.ClaimError = ""
+			} else if sample.ClaimError != "" {
+				next.ClaimError = sample.ClaimError
+			}
 			if sample.Known {
 				baseline := sample.First
 				if previous.Known {

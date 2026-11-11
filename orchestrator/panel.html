@@ -147,6 +147,10 @@ code { color: #e5c8ff }
 <button class="secondary">Сохранить выбор кампании</button>
 </form>
 {{end}}
+<details><summary>🎁 Получение Drops</summary>
+{{if .ClaimSummary}}<pre>{{.ClaimSummary}}</pre>{{else}}<p class="muted">Ошибок получения пока не записано.</p>{{end}}
+<form method="post"><input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="game" value="{{.Key}}">
+<button class="secondary" name="action" value="claim-earned">Получить готовые Drops</button></form></details>
 <details><summary>🏆 Кампании в пуле</summary>
 {{if .Coverage}}
 {{$poolSize := .Accounts}}

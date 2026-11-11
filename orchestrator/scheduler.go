@@ -34,6 +34,8 @@ type activeGame struct {
 }
 
 type scheduler struct {
+	claimCtx         context.Context
+	claimJobs        map[string]*claimJob
 	partialExport    partialGroupExport
 	restartRequests  chan struct{}
 	restartStep      int
@@ -470,7 +472,7 @@ func (s *scheduler) tick(ctx context.Context, now time.Time) {
 	}
 	var candidates []candidate
 	for key, g := range s.state.Games {
-		if g.Removing || g.Paused || g.Regroup || s.active[key] != nil || now.Before(s.retry[key]) {
+		if g.Removing || g.Paused || g.Regroup || s.active[key] != nil || s.claimJobRunning(key) || now.Before(s.retry[key]) {
 			continue
 		}
 		c := s.queuedCampaign(g, now)

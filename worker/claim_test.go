@@ -41,7 +41,7 @@ func TestAutoClaimRequiresInventoryConfirmation(t *testing.T) {
 					if req.Variables.Input.DropInstanceID != "own-instance" {
 						t.Fatal("claim used an unexpected drop instance")
 					}
-					return reviewReply(`{"data":{"claimDropRewards":{"status":"ELIGIBLE_FOR_ALL"}}}`), nil
+					return reviewReply(`{"data":{"claimDropRewards":{"status":"ELIGIBLE_FOR_ALL","isUserAccountConnected":false}}}`), nil
 				}
 				claimed := "false"
 				if tc.confirms && claims > 0 {
@@ -58,6 +58,10 @@ func TestAutoClaimRequiresInventoryConfirmation(t *testing.T) {
 			}
 			if claims != tc.wantClaims || state.rewardProgress["first"].Claimed != tc.confirms {
 				t.Fatalf("unexpected result: claims=%d, progress=%+v", claims, state.rewardProgress["first"])
+			}
+			reason := state.rewardProgress["first"].ClaimError
+			if tc.enabled && !tc.confirms && (!strings.Contains(reason, "аккаунт не привязан") || !strings.Contains(reason, "ELIGIBLE_FOR_ALL")) {
+				t.Fatalf("missing claim diagnostics: %q", reason)
 			}
 		})
 	}
