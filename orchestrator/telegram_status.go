@@ -44,8 +44,10 @@ func (s *scheduler) telegramStatus(now time.Time) string {
 	}
 	fmt.Fprint(&out, "\n\n🎮 Игры")
 	keys := make([]string, 0, len(s.state.Games))
-	for key := range s.state.Games {
-		keys = append(keys, key)
+	for key, g := range s.state.Games {
+		if !g.Paused || g.Removing {
+			keys = append(keys, key)
+		}
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		a, b := s.active[keys[i]] != nil, s.active[keys[j]] != nil
@@ -55,7 +57,11 @@ func (s *scheduler) telegramStatus(now time.Time) string {
 		return keys[i] < keys[j]
 	})
 	if len(keys) == 0 {
-		fmt.Fprint(&out, "\nИгр пока нет. Добавьте игру в разделе «Игры».")
+		if len(s.state.Games) == 0 {
+			fmt.Fprint(&out, "\nИгр пока нет. Добавьте игру в разделе «Игры».")
+		} else {
+			fmt.Fprint(&out, "\nВсе игры на ручной паузе.")
+		}
 	}
 	for _, key := range keys[:min(6, len(keys))] {
 		g := s.state.Games[key]

@@ -22,6 +22,7 @@ func telegramPrompt(input string) bot.SettingsPanel {
 		"policy":   {"⚙️ Правила игры", "Отправьте режим и запас в минутах через пробел.\n\nРежим: default — общий, speed — скорость, resources — экономия.\nЗапас: 0 — общий, 1–1440 — свой.\n\nПример: resources 20", "game:" + ref},
 		"upload":   {"📎 Загрузка в пул игры", "Прикрепите .txt как документ в течение пяти минут. Аккаунты будут добавлены в пул выбранной игры.", "game:" + ref},
 		"free":     {"👥 Возврат в свободный пул", "Отправьте только логин Twitch.\n\nПример: my_login", "accounts"},
+		"partial":  {"📤 Снять часть группы", "Отправьте число аккаунтов, которые нужно забрать. Покажем выборку по прогнозу времени до завершения.", "game-pool:" + ref},
 		"target":   {"👥 Целевой размер пула", "Отправьте одно положительное число.\n\nПример: 100", "game:" + ref},
 		"exclude":  {"🎁 Исключение награды", "Отправьте полное название награды одним сообщением. Регистр не важен.\n\nПример: Royal Purple Banana", "game:" + ref},
 		"include":  {"🎁 Возврат награды в фарм", "Отправьте полное название исключённой награды одним сообщением.\n\nПример: Royal Purple Banana", "game:" + ref},
@@ -46,7 +47,7 @@ func (s *scheduler) inputPrompt(input string) bot.SettingsPanel {
 		panel.Text += fmt.Sprintf("\n\nСейчас: запас %d мин, скорость %d%%, поиск каждые %d сек.", cfg.ReserveMinutes, cfg.ExpectedRatePercent, cfg.DiscoverySeconds)
 	case "digest":
 		panel.Text += "\n\n" + s.setDigest("")
-	case "target", "policy", "upload", "exclude", "include":
+	case "target", "policy", "upload", "exclude", "include", "partial":
 		for key, g := range s.state.Games {
 			if gameRef(key) != ref {
 				continue
@@ -128,6 +129,12 @@ func (s *scheduler) telegramInput(input, text string) bot.SettingsPanel {
 	}
 	var message string
 	switch kind {
+	case "partial":
+		count, err := strconv.Atoi(strings.TrimSpace(text))
+		if err != nil || count < 1 {
+			return retry("Укажите одно положительное число.")
+		}
+		return s.previewPartialExport(ref, count, time.Now())
 	case "find":
 		return s.telegramFindGame(text)
 	case "upload":

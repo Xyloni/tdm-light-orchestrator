@@ -83,8 +83,16 @@ func (s *scheduler) telegramCoveragePanel(kind, value string) bot.SettingsPanel 
 
 	now := time.Now()
 	selection := &s.telegramCoverage
-	if kind == "cov-export" {
+	if kind == "cov-export" || kind == "cov-deadline" {
 		*selection = campaignExportSelection{game: key, mode: "all", until: now.Add(5 * time.Minute)}
+		if kind == "cov-deadline" {
+			for _, c := range coverage.Campaigns {
+				if gameRef(c.ID) == arg {
+					selection.ids = []string{c.ID}
+					break
+				}
+			}
+		}
 	} else if selection.game != key || !now.Before(selection.until) {
 		panel.Text = "Срок выбора истёк. Откройте выгрузку заново."
 		row("Начать заново", "cov-export:"+ref)

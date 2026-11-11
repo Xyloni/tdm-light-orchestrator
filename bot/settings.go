@@ -18,11 +18,12 @@ type SettingsButton struct {
 }
 
 type SettingsPanel struct {
-	Title    string
-	Document *TelegramDocument
-	Input    string
-	Text     string
-	Buttons  [][]SettingsButton
+	Title       string
+	Document    *TelegramDocument
+	Input       string
+	Text        string
+	Buttons     [][]SettingsButton
+	AfterRender func()
 }
 
 type telegramSettingsCallback struct {

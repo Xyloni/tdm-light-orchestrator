@@ -2,19 +2,36 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
-	"github.com/xyloni/tdm-light-orchestrator/internal/dailylog"
 	"net"
 	"net/http"
 	"path/filepath"
 	"time"
 
 	"github.com/xyloni/tdm-light-orchestrator/config"
+	"github.com/xyloni/tdm-light-orchestrator/internal/dailylog"
 )
 
+var errRestartRequested = errors.New("orchestrator restart requested")
+
 func Run(ctx context.Context, dir, address string) error {
+	for {
+		err := runOnce(ctx, dir, address)
+		if !errors.Is(err, errRestartRequested) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+	}
+}
+
+func runOnce(parent context.Context, dir, address string) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
 	dir, err := filepath.Abs(dir)
 	if err != nil {
 		return err
@@ -36,6 +53,7 @@ func Run(ctx context.Context, dir, address string) error {
 		path:    path, state: current, miner: *cfg, active: make(map[string]*activeGame),
 		updates: make(chan processUpdate, 128), catalogs: make(chan discoveryResult, 1),
 		retry: make(map[string]time.Time), botChanges: make(chan struct{}, 1),
+		restartRequests: make(chan struct{}, 1),
 	}
 	host, _, err := net.SplitHostPort(address)
 	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
@@ -54,12 +72,19 @@ func Run(ctx context.Context, dir, address string) error {
 	defer server.Close()
 	webDone := make(chan error, 1)
 	botCtx, stopBots := context.WithCancel(ctx)
-	defer stopBots()
+	botsDone := make(chan struct{})
+	defer func() {
+		stopBots()
+		<-botsDone
+	}()
 	bots := &botRuntime{}
 	s.notify = bots.notify
 	s.initializeStats(time.Now())
 	s.event("orchestrator_started")
-	go s.runBots(botCtx, bots)
+	go func() {
+		defer close(botsDone)
+		s.runBots(botCtx, bots)
+	}()
 	go func() { webDone <- server.Serve(listener) }()
 	prune := func() {
 		if err := dailylog.Prune(logs, time.Now()); err != nil {
@@ -78,24 +103,22 @@ func Run(ctx context.Context, dir, address string) error {
 	defer retention.Stop()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	var stopReason error
+loop:
 	for {
 		select {
 		case <-ctx.Done():
-			for _, a := range s.active {
-				a.process.stop()
-			}
-			for len(s.active) > 0 {
-				u := <-s.updates
-				s.mu.Lock()
-				s.update(u, time.Now())
-				s.mu.Unlock()
-			}
-			return nil
+			break loop
+		case <-s.restartRequests:
+			stopReason = errRestartRequested
+			break loop
 		case err := <-webDone:
-			return err
+			stopReason = err
+			break loop
 		case now := <-digest.C:
 			s.mu.Lock()
 			s.sendDailyDigest(now)
+			s.sendDeadlineReports(now)
 			s.mu.Unlock()
 		case now := <-resources.C:
 			s.mu.Lock()
@@ -117,4 +140,25 @@ func Run(ctx context.Context, dir, address string) error {
 			s.mu.Unlock()
 		}
 	}
+	s.mu.Lock()
+	for _, a := range s.active {
+		a.stopping = true
+		a.process.stop()
+	}
+	s.mu.Unlock()
+	for len(s.active) > 0 {
+		u := <-s.updates
+		s.mu.Lock()
+		s.update(u, time.Now())
+		s.mu.Unlock()
+	}
+	cancel()
+	if errors.Is(stopReason, errRestartRequested) {
+		shutdownCtx, stopShutdown := context.WithTimeout(context.Background(), 25*time.Second)
+		defer stopShutdown()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("остановка веб-панели перед перезапуском: %w", err)
+		}
+	}
+	return stopReason
 }

@@ -25,6 +25,7 @@ func (b *Bot) registerOrchestratorMenu(ctx context.Context) {
 		{"command": "menu", "description": "Панель управления с кнопками"},
 		{"command": "status", "description": "Активные кампании и состояние Twitch"},
 		{"command": "lagging", "description": "Темп начисления за 10–15 и 30–35 минут"},
+		{"command": "deadline", "description": "Отчёты по ближайшим дедлайнам кампаний"},
 		{"command": "system_load", "description": "Нагрузка VPS и контейнера"},
 		{"command": "stats", "description": "Статистика за сегодня, неделю и всё время"},
 		{"command": "download_logs", "description": "Скачать архив дневных логов"},
@@ -85,6 +86,8 @@ func (b *Bot) handleOrchestratorText(ctx context.Context, cmd, args, text string
 		action = "logs:" + args
 	case cmd == "/help":
 		action = "help:" + args
+	case cmd == "/deadline":
+		action = "deadline"
 	case cmd == "/system_load":
 		action = "system-load"
 	case args == "" && (cmd == "/notifications" || cmd == "/lagging" || cmd == "/stats"):
@@ -104,7 +107,14 @@ func (b *Bot) handleOrchestratorText(ctx context.Context, cmd, args, text string
 	}
 }
 
-func (b *Bot) renderOrchestratorPanel(ctx context.Context, action string, panel SettingsPanel, fallbackID int64, moveToBottom bool) bool {
+func (b *Bot) renderOrchestratorPanel(ctx context.Context, action string, panel SettingsPanel, fallbackID int64, moveToBottom bool) (rendered bool) {
+	if panel.AfterRender != nil {
+		defer func() {
+			if rendered {
+				panel.AfterRender()
+			}
+		}()
+	}
 	if panel.Document != nil {
 		panel.Text = b.sendOrchestratorDocument(ctx, panel.Document)
 		moveToBottom = true

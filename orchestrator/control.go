@@ -636,7 +636,7 @@ func (s *scheduler) trim(confirm bool) string {
 		}
 		for position, name := range c.Group {
 			p, known := progress[name]
-			if terminal(p.status) {
+			if terminal(p.status) || c.Results[name] != "" {
 				continue
 			}
 			if !known {

@@ -26,9 +26,15 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 	}
 	kind, exportValue, _ := strings.Cut(action, ":")
 	switch kind {
+	case "partial-confirm":
+		return s.confirmPartialExport(exportValue, time.Now())
+	case "deadline", "deadline-game":
+		return s.telegramDeadline(kind, exportValue, time.Now())
+	case "restart-all", "restart-all-first-confirm", "restart-all-second-confirm", "restart-all-final-confirm", "restart-all-cancel":
+		return s.telegramRestart(kind, time.Now())
 	case "farm-campaign", "farm-pick":
 		return s.telegramCampaignSelection(kind, exportValue)
-	case "cov", "cov-sets", "cov-export", "cov-toggle", "cov-mode", "cov-page", "cov-confirm", "cov-pairs":
+	case "cov", "cov-sets", "cov-export", "cov-toggle", "cov-mode", "cov-page", "cov-confirm", "cov-pairs", "cov-deadline":
 		return s.telegramCoveragePanel(kind, exportValue)
 	case "help", "help-commands":
 		return telegramHelp(exportValue, kind == "help-commands")
@@ -166,6 +172,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		panel.Text = s.telegramStatus(time.Now())
 		row(button("Обновить", "status"), button("Темп начисления", "lagging"))
 		row(button("Игры", "games"), button("Статистика", "stats"))
+		row(button("Игры на паузе", "paused-games"), button("До дедлайна", "deadline"))
 	case "settings", "speed", "resources", "trim", "trim-confirm":
 		if input, text, ok := strings.Cut(action, "\n"); ok {
 			return s.telegramInput(input, text)
@@ -200,6 +207,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		row(button("Предпросмотр всех игр", "preview-all"), button("Перегруппировать все игры", "regroup-all"))
 		row(button("Симулятор расписания", "prompt:simulate"))
 		row(button("Рассчитать снижение нагрузки", "trim"))
+		row(button("🔄 Перезапустить оркестратор", "restart-all"))
 		if (action == "trim" || action == "trim-confirm") && strings.Contains(panel.Text, "Для подтверждения") {
 			row(button("Подтвердить остановку", "trim-confirm"))
 		}
@@ -228,27 +236,39 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		defer s.mu.Unlock()
 		kind, value, _ := strings.Cut(action, ":")
 		switch kind {
-		case "games":
+		case "games", "paused-games":
+			pausedOnly := kind == "paused-games"
 			keys := make([]string, 0, len(s.state.Games))
-			for key := range s.state.Games {
-				keys = append(keys, key)
+			for key, g := range s.state.Games {
+				if !pausedOnly || (g.Paused && !g.Removing) {
+					keys = append(keys, key)
+				}
 			}
 			sort.Strings(keys)
 			page, _ := strconv.Atoi(value)
 			page = max(0, min(page, max(0, len(keys)-1)/8))
 			panel.Text = fmt.Sprintf("Игр в списке: %d\n\nВыберите игру, чтобы открыть её состояние и действия.", len(keys))
-			row(button("Найти игру в Twitch", "prompt:find"), button("Ввести точное название", "prompt:add"))
-			if len(keys) == 0 {
-				panel.Text = "Игры ещё не добавлены."
+			if pausedOnly {
+				if len(keys) == 0 {
+					panel.Text = "Игр на ручной паузе нет."
+				}
+			} else {
+				row(button("Найти игру в Twitch", "prompt:find"), button("Ввести точное название", "prompt:add"))
+				if len(keys) == 0 {
+					panel.Text = "Игры ещё не добавлены."
+				}
 			}
 			for _, key := range keys[page*8 : min(len(keys), (page+1)*8)] {
 				row(button(s.state.Games[key].Name, "game:"+gameRef(key)))
 			}
 			if page > 0 {
-				row(button("Предыдущие", fmt.Sprintf("games:%d", page-1)))
+				row(button("Предыдущие", fmt.Sprintf("%s:%d", kind, page-1)))
 			}
 			if (page+1)*8 < len(keys) {
-				row(button("Следующие", fmt.Sprintf("games:%d", page+1)))
+				row(button("Следующие", fmt.Sprintf("%s:%d", kind, page+1)))
+			}
+			if pausedOnly {
+				row(button("Статус фарма", "status"))
 			}
 		case "game", "game-pool", "game-options", "stop", "resume", "restart", "regroup", "regroup-confirm", "remove", "remove-release-confirm", "remove-delete-confirm", "clear-game", "clear-release-confirm", "clear-delete-confirm", "report", "game-quarantine", "game-stats", "game-lagging", "game-lagging-details", "game-preview", "game-preview-speed", "game-preview-resources":
 			panel.Text = "Игра больше не найдена."
@@ -267,6 +287,9 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 					panel.Text = fmt.Sprintf("Аккаунты: %d / %d\n\nЗдесь можно загрузить или выгрузить список и изменить целевой размер пула.", count, g.Target)
 					row(button("Загрузить .txt", "prompt:upload:"+value), button("Выгрузить .txt", "export:"+value))
 					row(button("Размер пула", "prompt:target:"+value), button("Карантин", "game-quarantine:"+value))
+					if a := s.active[key]; a != nil && !a.groupStarted.IsZero() && !a.stopping {
+						row(button("📤 Снять и выгрузить часть группы", "prompt:partial:"+value))
+					}
 					row(button("Очистить пул", "clear-game:"+value))
 					row(button("К игре", "game:"+value))
 					return panel

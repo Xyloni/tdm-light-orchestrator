@@ -16,6 +16,7 @@ var noticeKinds = []noticeKind{
 	{"catalog", "Каталог Twitch: сбой и восстановление", true},
 	{"capacity", "Превышение лимита аккаунтов", true},
 	{"campaign_done", "Итог кампании", true},
+	{"deadline", "Отчёт за 3 часа до конца кампании", true},
 	{"campaign_new", "Новая кампания", false},
 	{"airtime", "Эфиры кампании: ожидание, сбой и появление", true},
 	{"group_start", "Запуск группы", false},

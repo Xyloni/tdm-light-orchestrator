@@ -34,6 +34,10 @@ type activeGame struct {
 }
 
 type scheduler struct {
+	partialExport    partialGroupExport
+	restartRequests  chan struct{}
+	restartStep      int
+	restartUntil     time.Time
 	resources        resourceMonitor
 	airtimes         map[string]*campaignAirtime
 	airtimeChecks    int

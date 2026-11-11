@@ -62,6 +62,7 @@ type campaign struct {
 	CompletedGroups          int
 	PlannedGroupTime         time.Duration
 	ActualGroupTime          time.Duration
+	DeadlineReportSentFor    time.Time `json:",omitzero"`
 }
 
 type state struct {
