@@ -154,7 +154,7 @@ code { color: #e5c8ff }
 <details><summary>🏆 Кампании в пуле</summary>
 {{if .Coverage}}
 {{$poolSize := .Accounts}}
-<ul>{{range .Coverage}}<li><strong>{{.Name}}</strong><br>Завершили {{.Complete}} из {{$poolSize}}{{if .Ready}} · готовы к получению {{.Ready}}{{end}}{{if .Claimed}} · получены {{.Claimed}}{{end}}{{if .Unknown}} · статус получения неизвестен у {{.Unknown}}{{end}}</li>{{end}}</ul>
+<ul>{{range .Coverage}}<li><strong>{{.Name}}</strong><br>Завершили {{.Complete}} из {{$poolSize}}{{if .Ready}} · готовы к получению {{.Ready}}{{end}}{{if .Claimed}} · получены {{.Claimed}}{{end}}{{if .Unknown}} · статус получения неизвестен у {{.Unknown}}{{end}}<br>Наград по данным Twitch: {{.EarnedRewards}} · аккаунтов с наградами: {{.AccountsWithRewards}} из {{$poolSize}}</li>{{end}}</ul>
 <details><summary>По наборам кампаний</summary><ul>{{range .CoverageSets}}<li><strong>{{.Count}} акк.</strong> · {{.Names}}</li>{{end}}</ul></details>
 {{if not .Removing}}<form class="stack" method="post">
 <input type="hidden" name="csrf" value="{{$.Token}}"><input type="hidden" name="game" value="{{.Key}}">

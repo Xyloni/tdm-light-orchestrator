@@ -56,6 +56,7 @@ func (s *scheduler) telegramCoveragePanel(kind, value string) bot.SettingsPanel 
 		if kind == "cov" {
 			for _, c := range coverage.Campaigns[from:to] {
 				fmt.Fprintf(&out, "\n\n🏆 %s\nЗавершили: %d / %d\nГотово к получению: %d · Получено: %d", brief(c.Name, 90), c.Complete, len(coverage.Accounts), c.Ready, c.Claimed)
+				fmt.Fprintf(&out, "\nНаград по данным Twitch: %d · аккаунтов с наградами: %d / %d", c.EarnedRewards, c.AccountsWithRewards, len(coverage.Accounts))
 				if c.Unknown > 0 {
 					fmt.Fprintf(&out, "\nСтатус получения неизвестен: %d", c.Unknown)
 				}

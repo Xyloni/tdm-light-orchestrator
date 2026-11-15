@@ -310,6 +310,10 @@ func webHandler(s *scheduler) (http.Handler, error) {
 			http.Error(w, "Local access only", http.StatusForbidden)
 			return
 		}
+		if r.URL.Path == "/internal/lot-preview" {
+			s.serveLotPreview(w, r)
+			return
+		}
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return

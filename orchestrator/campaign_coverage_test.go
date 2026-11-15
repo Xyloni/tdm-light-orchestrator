@@ -30,7 +30,7 @@ func TestCampaignCoverageAndConfirmedTelegramExport(t *testing.T) {
 		"example\x00swiss\x00partial\x00reward": {Known: true, Minutes: 30},
 	}
 	c := s.coverage("example", g)
-	if got := c.Campaigns[1]; got.Complete != 3 || got.Ready != 1 || got.Claimed != 1 || got.Unknown != 1 {
+	if got := c.Campaigns[1]; got.Complete != 3 || got.Ready != 1 || got.Claimed != 1 || got.Unknown != 1 || got.EarnedRewards != 2 || got.AccountsWithRewards != 2 {
 		t.Fatalf("unexpected coverage: %+v", got)
 	}
 	for mode, want := range map[string]int{"all": 1, "any": 4, "exact": 1} {

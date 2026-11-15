@@ -10,8 +10,9 @@ import (
 )
 
 type coverageCampaign struct {
-	ID, Name                          string
-	Complete, Ready, Claimed, Unknown int
+	ID, Name                           string
+	Complete, Ready, Claimed, Unknown  int
+	EarnedRewards, AccountsWithRewards int
 }
 
 type coverageSet struct {
@@ -64,12 +65,21 @@ func (s *scheduler) coverage(key string, g *gameState) campaignCoverage {
 		for i, a := range out.Accounts {
 			earned := len(rewards) > 0 && a.Credentials.UserID != ""
 			claimed := earned
+			earnedCount := 0
 			for _, reward := range rewards {
 				id := reward.ID
 				progress := s.state.Stats.Progress[key+"\x00"+c.ID+"\x00"+a.Credentials.UserID+"\x00"+id]
-				earned = earned && id != "" && (progress.Earned || progress.Ready || progress.Claimed ||
+				hasReward := a.Credentials.UserID != "" && id != "" && (progress.Earned || progress.Ready || progress.Claimed ||
 					(progress.Known && progress.Minutes >= reward.Minutes))
+				if hasReward {
+					earnedCount++
+				}
+				earned = earned && hasReward
 				claimed = claimed && id != "" && progress.Claimed
+			}
+			if earnedCount > 0 {
+				line.EarnedRewards += earnedCount
+				line.AccountsWithRewards++
 			}
 			if !earned && c.Results[a.Credentials.Login] != "idle" {
 				continue

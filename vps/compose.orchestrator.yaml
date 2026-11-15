@@ -9,6 +9,7 @@ services:
       ORCHESTRATOR_CONTAINER_METRICS: "1"
       ORCHESTRATOR_DIR: /data/orchestrator
       ORCHESTRATOR_WEB_ADDR: 127.0.0.1:8787
+      ORCHESTRATOR_LOT_PREVIEW_TOKEN: ${ORCHESTRATOR_LOT_PREVIEW_TOKEN:-}
       TZ: ${TZ:-Europe/Moscow}
     volumes:
       - ./data:/data

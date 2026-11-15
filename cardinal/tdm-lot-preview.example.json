@@ -1,0 +1,10 @@
+{
+  "lot_id": "12345",
+  "game": "Rust",
+  "campaign_ids": ["replace-with-twitch-campaign-id"],
+  "products_path": "storage/products/any-name.txt",
+  "format": "login-password",
+  "sample_limit": 10,
+  "buffer_hours": 24,
+  "verified_deadlines": []
+}
