@@ -16,11 +16,12 @@ type lotBundleDraft struct {
 	Selected         map[string]map[string]bool
 }
 
-func (s *scheduler) registerLotTitle(ref, title string) error {
+func (s *scheduler) registerLotTitle(ref, title string, sample []lotSampleAccount) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous, exists := s.state.LotTitles[ref]
 	if exists && previous == title {
+		s.storeLotSampleLocked(ref, sample)
 		return nil
 	}
 	if s.state.LotTitles == nil {
@@ -28,6 +29,7 @@ func (s *scheduler) registerLotTitle(ref, title string) error {
 	}
 	s.state.LotTitles[ref] = title
 	if s.persist() {
+		s.storeLotSampleLocked(ref, sample)
 		return nil
 	}
 	if exists {
@@ -173,6 +175,7 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 		}
 		bundlePageRows(&panel, arg(2), items, func(page int) string { return link("games", strconv.Itoa(page)) })
 		bundleButton(&panel, "🔎 Найти кампании Twitch", "prompt:lb-find:"+draft.Token)
+		bundleButton(&panel, "🎒 Искать в аккаунтах этого лота", "prompt:lb-inventory:"+draft.Token)
 		if draft.Game != "" {
 			bundleButton(&panel, "⬅️ К кампаниям", link("campaigns", "0"))
 		}
@@ -225,6 +228,9 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 				draft.Selected[id] = selected
 			}
 			panel.Text += fmt.Sprintf("🎯 %s\nОтмечено наград: %d из %d", item.Name, len(selected), len(item.Rewards))
+			if item.InventoryOnly {
+				panel.Text += "\nПоказаны награды из инвентаря. Сверьте их с обещанным составом лота."
+			}
 			var items []bot.SettingsButton
 			for i, r := range item.Rewards {
 				mark := "○ "

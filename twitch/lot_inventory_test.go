@@ -11,6 +11,25 @@ import (
 	"github.com/xyloni/tdm-light-orchestrator/parser"
 )
 
+func TestLotCampaignInventoryImportsExactIDs(t *testing.T) {
+	for _, user := range []string{"player", "another"} {
+		body := `{"data":{"currentUser":{"id":"17","login":"` + user + `","inventory":{"dropCampaignsInProgress":[{"id":"campaign","name":"Old season","game":{"name":"Game"},"timeBasedDrops":[{"id":"drop","name":"Reward","benefitEdges":[{"benefit":{"id":"benefit"}}]}]}]}}}}`
+		client := NewGQLClient(&http.Client{Transport: reviewTransport(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})}, config.Default(), &parser.Account{Login: "player", UserID: "17"})
+		catalog, err := client.LotCampaignsInInventory(context.Background())
+		if user != "player" {
+			if err == nil {
+				t.Fatal("different user accepted")
+			}
+			continue
+		}
+		if err != nil || len(catalog) != 1 || catalog[0].TimeBasedDrops[0].BenefitEdges[0].Benefit.ID != "benefit" {
+			t.Fatalf("catalog=%+v error=%v", catalog, err)
+		}
+	}
+}
+
 func TestReadLotInventoryRequiresConfirmedAbsence(t *testing.T) {
 	for _, tt := range []struct {
 		name, userID, inventory string

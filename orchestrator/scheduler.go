@@ -35,6 +35,7 @@ type activeGame struct {
 
 type scheduler struct {
 	lotBundleDraft   *lotBundleDraft
+	lotSamples       map[string]lotRegistrationSample
 	lotPreviewDraft  lotPreviewSelection
 	lotPreviewRef    string
 	claimCtx         context.Context

@@ -29,10 +29,39 @@ type lotInventoryCampaign struct {
 type LotCampaign struct {
 	ID, Name       string
 	Game           struct{ Name string }
-	TimeBasedDrops []struct {
-		ID, Name     string
-		BenefitEdges []struct{ Benefit struct{ ID string } }
+	TimeBasedDrops []LotCampaignDrop
+}
+
+type LotCampaignDrop struct {
+	ID, Name     string
+	BenefitEdges []struct{ Benefit struct{ ID string } }
+}
+
+func (c *GQLClient) LotCampaignsInInventory(ctx context.Context) ([]LotCampaign, error) {
+	const query = `query TDMManagedLotInventoryCatalog {
+		currentUser { id login inventory { dropCampaignsInProgress {
+			id name game { name }
+			timeBasedDrops { id name benefitEdges { benefit { id } } }
+		} } }
+	}`
+	var result struct {
+		CurrentUser *struct {
+			ID, Login string
+			Inventory *struct{ DropCampaignsInProgress json.RawMessage }
+		}
 	}
+	if err := c.do(ctx, "TDMManagedLotInventoryCatalog", query, nil, &result); err != nil {
+		return nil, err
+	}
+	user := result.CurrentUser
+	if user == nil || user.ID != c.Account.UserID || !strings.EqualFold(user.Login, c.Account.Login) || user.Inventory == nil {
+		return nil, fmt.Errorf("Twitch did not confirm account inventory")
+	}
+	var campaigns []LotCampaign
+	if err := json.Unmarshal(user.Inventory.DropCampaignsInProgress, &campaigns); err != nil {
+		return nil, err
+	}
+	return campaigns, nil
 }
 
 func (c *GQLClient) LotCampaigns(ctx context.Context) ([]LotCampaign, error) {

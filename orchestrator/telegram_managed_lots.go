@@ -22,6 +22,7 @@ type lotCatalogCampaign struct {
 	Benefits        map[string][]string `json:",omitempty"`
 	VerifiedExpires *time.Time          `json:",omitempty"`
 	Source          string              `json:",omitempty"`
+	InventoryOnly   bool                `json:",omitempty"`
 }
 
 func (s *scheduler) telegramManagedLots() bot.SettingsPanel {
@@ -31,6 +32,7 @@ func (s *scheduler) telegramManagedLots() bot.SettingsPanel {
 	return bot.SettingsPanel{Title: "🏷 Лоты", Text: text, Buttons: [][]bot.SettingsButton{
 		{{Label: "📚 Каталог", Action: "lot-catalog-page:0"}, {Label: "➕ Добавить кампанию", Action: "prompt:lot-catalog"}},
 		{{Label: "🔎 Загрузить кампании из Twitch", Action: "prompt:lot-discover"}},
+		{{Label: "🎒 Найти в инвентаре аккаунта", Action: "prompt:lot-inventory"}},
 		{{Label: "📋 Состав лота", Action: "lb-list:0"}},
 		{{Label: "📎 Загрузить аккаунты лотов", Action: "prompt:upload:lot-credentials"}},
 		{{Label: "🔎 Ручной предпросмотр", Action: "lot-preview"}},
@@ -78,6 +80,9 @@ func (s *scheduler) telegramLotCatalog(value string) bot.SettingsPanel {
 			item := s.state.LotCatalog[id]
 			var text strings.Builder
 			fmt.Fprintf(&text, "%s · %s\nID кампании — %s\n\n", item.Game, item.Name, id)
+			if item.InventoryOnly {
+				text.WriteString("Из инвентаря аккаунта. Сверьте количество наград с составом лота.\n\n")
+			}
 			for _, reward := range item.Rewards {
 				fmt.Fprintf(&text, "• %s — %s\n", brief(reward.Name, 50), reward.ID)
 			}
@@ -244,30 +249,57 @@ func validLotID(id string) bool {
 	return id != "" && len(id) <= 100 && !strings.ContainsAny(id, " \t\r\n/|")
 }
 
-func (s *scheduler) discoverLotCampaigns(game string) (int, error) {
-	game = strings.TrimSpace(game)
-	if !validLotLabel(game) {
-		return 0, fmt.Errorf("укажите название игры")
+func (s *scheduler) discoverLotCampaigns(query, login string) (int, error) {
+	query = strings.TrimSpace(query)
+	if !validLotLabel(query) {
+		return 0, fmt.Errorf("укажите название игры или кампании")
 	}
+	login = strings.ToLower(strings.TrimSpace(login))
 	s.mu.Lock()
 	var accounts []parser.Account
-	for _, a := range s.state.LotCredentials {
-		accounts = append(accounts, a)
-		if len(accounts) == 3 {
-			break
+	var history []twitch.LotCampaign
+	if login != "" {
+		if a, ok := s.state.LotCredentials[login]; ok {
+			accounts = append(accounts, a)
+		}
+		if a, ok := s.state.LotAccounts[login]; ok {
+			accounts = append(accounts, a.Credentials)
+		}
+	} else {
+		for _, game := range s.state.Games {
+			for _, record := range game.Campaigns {
+				if record == nil || len(record.Rewards) == 0 {
+					continue
+				}
+				item := twitch.LotCampaign{ID: record.ID, Name: record.Name}
+				item.Game.Name = game.Name
+				for _, reward := range record.Rewards {
+					item.TimeBasedDrops = append(item.TimeBasedDrops, twitch.LotCampaignDrop{ID: reward.ID, Name: reward.Name})
+				}
+				history = append(history, item)
+			}
+		}
+		for _, a := range s.state.LotCredentials {
+			accounts = append(accounts, a)
+			if len(accounts) == 3 {
+				break
+			}
 		}
 	}
 	for _, a := range s.state.Accounts {
-		if len(accounts) == 3 {
+		if len(accounts) == 3 || (login != "" && len(accounts) > 0) {
 			break
 		}
-		if !a.Quarantined {
+		if !a.Quarantined && (login == "" || strings.EqualFold(a.Credentials.Login, login)) {
 			accounts = append(accounts, a.Credentials)
 		}
 	}
 	cfg := s.miner
 	s.mu.Unlock()
-	if len(accounts) == 0 {
+	if len(accounts) == 0 && login != "" {
+		return 0, fmt.Errorf("аккаунт не найден. Загрузите его полный TXT в «Лоты → Загрузить аккаунты лотов»")
+	}
+	if len(accounts) == 0 && len(history) == 0 {
 		return 0, fmt.Errorf("для каталога нужен хотя бы один аккаунт Twitch")
 	}
 	cfg.Diagnostics = false
@@ -275,19 +307,32 @@ func (s *scheduler) discoverLotCampaigns(game string) (int, error) {
 	defer client.CloseIdleConnections()
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-	var campaigns []twitch.LotCampaign
+	var remote []twitch.LotCampaign
 	var err error
 	for _, account := range accounts {
-		campaigns, err = twitch.NewGQLClient(client, &cfg, &account).LotCampaigns(ctx)
+		gql := twitch.NewGQLClient(client, &cfg, &account)
+		if login == "" {
+			remote, err = gql.LotCampaigns(ctx)
+		} else {
+			remote, err = gql.LotCampaignsInInventory(ctx)
+		}
 		if err == nil || ctx.Err() != nil {
 			break
 		}
 	}
-	if err != nil {
-		return 0, fmt.Errorf("Twitch не подтвердил каталог. Повторите поиск или добавьте кампанию вручную")
+	if err != nil && login != "" {
+		return 0, fmt.Errorf("Twitch не подтвердил инвентарь аккаунта. Проверьте его авторизацию и повторите поиск")
 	}
-	query := strings.ToLower(game)
-	exactGame := slices.ContainsFunc(campaigns, func(c twitch.LotCampaign) bool { return strings.EqualFold(c.Game.Name, game) })
+	added, saveErr := s.importLotCampaigns(query, append(remote, history...), login != "")
+	if err != nil && saveErr == nil && added == 0 {
+		return 0, fmt.Errorf("Twitch не подтвердил каталог. Проверьте сохранённые кампании или поищите в инвентаре аккаунта")
+	}
+	return added, saveErr
+}
+
+func (s *scheduler) importLotCampaigns(query string, campaigns []twitch.LotCampaign, inventoryOnly bool) (int, error) {
+	query = strings.ToLower(query)
+	exactGame := slices.ContainsFunc(campaigns, func(c twitch.LotCampaign) bool { return strings.EqualFold(c.Game.Name, query) })
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous := s.state.LotCatalog
@@ -295,20 +340,24 @@ func (s *scheduler) discoverLotCampaigns(game string) (int, error) {
 	if catalog == nil {
 		catalog = make(map[string]lotCatalogCampaign)
 	}
-	added := 0
+	updated := make(map[string]bool)
 	for _, campaign := range campaigns {
 		name := strings.ToLower(campaign.Game.Name)
-		if (exactGame && name != query) || !strings.Contains(name, query) || !validLotID(campaign.ID) || len(campaign.TimeBasedDrops) == 0 {
+		matches := strings.Contains(name, query) || strings.Contains(strings.ToLower(campaign.Name), query)
+		if name == "" || campaign.Name == "" || (exactGame && name != query) || !matches || !validLotID(campaign.ID) || len(campaign.TimeBasedDrops) == 0 {
 			continue
 		}
-		if _, exists := catalog[campaign.ID]; exists {
+		existing, exists := catalog[campaign.ID]
+		if exists && (!existing.InventoryOnly || !strings.EqualFold(existing.Game, campaign.Game.Name)) {
 			continue
 		}
-		item := lotCatalogCampaign{Game: campaign.Game.Name, Name: campaign.Name, Benefits: make(map[string][]string)}
+		item := lotCatalogCampaign{Game: campaign.Game.Name, Name: campaign.Name, Benefits: make(map[string][]string), InventoryOnly: inventoryOnly}
+		seen := make(map[string]bool)
 		for _, drop := range campaign.TimeBasedDrops {
-			if !validLotID(drop.ID) {
+			if !validLotID(drop.ID) || drop.Name == "" || seen[drop.ID] {
 				continue
 			}
+			seen[drop.ID] = true
 			item.Rewards = append(item.Rewards, lotReward{Campaign: campaign.ID, ID: drop.ID, Name: drop.Name})
 			for _, edge := range drop.BenefitEdges {
 				if validLotID(edge.Benefit.ID) {
@@ -319,15 +368,35 @@ func (s *scheduler) discoverLotCampaigns(game string) (int, error) {
 		if len(item.Rewards) == 0 {
 			continue
 		}
+		if exists && inventoryOnly {
+			merged := existing
+			merged.Rewards = slices.Clone(existing.Rewards)
+			merged.Benefits = maps.Clone(existing.Benefits)
+			if merged.Benefits == nil {
+				merged.Benefits = make(map[string][]string)
+			}
+			for _, reward := range item.Rewards {
+				if !slices.ContainsFunc(merged.Rewards, func(r lotReward) bool { return r.ID == reward.ID }) {
+					merged.Rewards = append(merged.Rewards, reward)
+				}
+				if len(merged.Benefits[reward.ID]) == 0 && len(item.Benefits[reward.ID]) > 0 {
+					merged.Benefits[reward.ID] = item.Benefits[reward.ID]
+				}
+			}
+			if len(merged.Rewards) == len(existing.Rewards) && len(merged.Benefits) == len(existing.Benefits) {
+				continue
+			}
+			item = merged
+		}
 		catalog[campaign.ID] = item
-		added++
+		updated[campaign.ID] = true
 	}
-	if added == 0 {
+	if len(updated) == 0 {
 		return 0, nil
 	}
 	s.state.LotCatalog = catalog
 	if s.persist() {
-		return added, nil
+		return len(updated), nil
 	}
 	s.state.LotCatalog = previous
 	return 0, fmt.Errorf("не удалось сохранить каталог")

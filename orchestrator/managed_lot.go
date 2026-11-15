@@ -30,6 +30,7 @@ type lotAccount struct {
 type managedLotRequest struct {
 	Operation, Lot, Login, AccountLine string
 	Title                              string
+	Sample                             []lotSampleAccount
 }
 
 func (s *scheduler) uploadLotCredentials(data []byte) error {
@@ -290,11 +291,11 @@ func (s *scheduler) serveManagedLot(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Operation == "register" {
 		digest := sha256.Sum256([]byte(req.Title))
-		if req.Lot != fmt.Sprintf("%x", digest[:12]) || strings.TrimSpace(req.Title) == "" || req.AccountLine != "" || req.Login != "" {
+		if req.Lot != fmt.Sprintf("%x", digest[:12]) || strings.TrimSpace(req.Title) == "" || req.AccountLine != "" || req.Login != "" || !validLotSample(req.Sample) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		if err := s.registerLotTitle(req.Lot, brief(strings.Join(strings.Fields(req.Title), " "), 160)); err != nil {
+		if err := s.registerLotTitle(req.Lot, brief(strings.Join(strings.Fields(req.Title), " "), 160), req.Sample); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}

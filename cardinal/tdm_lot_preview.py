@@ -17,7 +17,7 @@ from threading import BoundedSemaphore, Lock, RLock, Thread
 from urllib import error, parse, request
 
 NAME = "TDM Drops lots"
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 DESCRIPTION = "Checks Twitch Drops, guards Cardinal delivery and retires configured lots."
 CREDITS = "TDM Light Orchestrator"
 UUID = "b66cfbb9-9fe6-40e1-b9da-cf1d0e326542"
@@ -176,7 +176,7 @@ def write_preview(config):
     return result
 
 
-def managed_request(ref, operation=None, login=None, account_line=None, title=None):
+def managed_request(ref, operation=None, login=None, account_line=None, title=None, sample=None):
     token = os.environ.get("ORCHESTRATOR_LOT_PREVIEW_TOKEN", "")
     if len(token) < 32:
         raise ValueError("Orchestrator connection is not configured")
@@ -189,6 +189,8 @@ def managed_request(ref, operation=None, login=None, account_line=None, title=No
             data["AccountLine"] = account_line
         if title is not None:
             data["Title"] = title
+        if sample is not None:
+            data["Sample"] = sample
         req = request.Request(MANAGED_URL, data=json.dumps(data).encode(), headers=headers)
     with open_orchestrator(req) as response:
         return json.load(response)
@@ -227,6 +229,28 @@ def product_rows(path, product_format):
             raise ValueError(f"Проверьте данные и дубликаты в строке {number}.")
         rows[login] = line
     return rows
+
+
+def lot_stock_sample(path, blocked, sold, limit=5):
+    sample = []
+    seen = set()
+    with path.open(encoding="utf-8-sig") as rows:
+        for line in rows:
+            fields = [field.strip() for field in line.rstrip("\r\n").split(":")]
+            full = len(fields) == 6 and "@" in fields[0] and re.fullmatch(r"[0-9]{1,20}", fields[4])
+            login = fields[1 if full else 0].lower()
+            if len(fields) < 2 or len(login) > 64 or not LOGIN.fullmatch(login):
+                continue
+            if login in seen or login in blocked or sold_key(login) in sold:
+                continue
+            item = {"Login": login}
+            if full and re.fullmatch(r"[!-~]{1,512}", fields[3]) and re.fullmatch(r"[!-~]{1,128}", fields[5]):
+                item.update(OAuth=fields[3], UserID=fields[4], DeviceID=fields[5])
+            sample.append(item)
+            seen.add(login)
+            if len(sample) == limit:
+                break
+    return sample
 
 
 def atomic_text(path, text, mode=0o600):
@@ -854,12 +878,18 @@ def init_telegram(crd, *_):
             keyboard = InlineKeyboardMarkup()
             keyboard.add(InlineKeyboardButton("⬅️ К лоту", callback_data=f"tdm-lots:lot:{ref}"))
             try:
-                if managed_request(ref, "register", title=title).get("state") != "registered":
+                with automation.lock, product_lock:
+                    lot = automation.data.get(ref)
+                    blocked = automation.blocked_logins(lot) if lot else set()
+                    sold = set(lot["sold"]) if lot else set()
+                    sample = lot_stock_sample(path, blocked, sold)
+                if managed_request(ref, "register", title=title, sample=sample).get("state") != "registered":
                     raise ValueError("Registration was not acknowledged")
             except (OSError, ValueError, TypeError):
                 reply(chat, "Не удалось передать лот. Проверьте связь с оркестратором и его версию.", keyboard)
                 return
-            reply(chat, "✅ Лот появился в боте оркестратора. Откройте «Лоты → Состав лота» и выберите его по названию.", keyboard)
+            reply(chat, "✅ Лот появился в боте оркестратора. Откройте «Лоты → Состав лота» и выберите его по названию."
+                        " Для поиска в инвентаре оркестратор сам возьмёт аккаунты из этого лота.", keyboard)
             return
         if action == "bundle":
             keyboard = InlineKeyboardMarkup()

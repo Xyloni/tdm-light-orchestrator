@@ -21,6 +21,14 @@ class ManagedLotsTest(unittest.TestCase):
         button = plugin.lot_code_button(LegacyButton, ref)
         self.assertEqual(button.to_dict(), {"text": "📋 Скопировать код", "copy_text": {"text": ref}})
 
+    def test_registration_sample_omits_passwords_and_reserved_accounts(self):
+        self.path.write_text("sold:password\nreserve:password\nshort:password:with:colon\n"
+                             "fixture@example.invalid:full:private-password:oauth-fixture:17:device\nshort:again\n",
+                             encoding="utf-8")
+        sample = plugin.lot_stock_sample(self.path, {"reserve"}, {plugin.sold_key("sold")})
+        self.assertEqual(sample, [{"Login": "short"},
+                                  {"Login": "full", "OAuth": "oauth-fixture", "UserID": "17", "DeviceID": "device"}])
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

@@ -6,12 +6,65 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/xyloni/tdm-light-orchestrator/bot"
+	"github.com/xyloni/tdm-light-orchestrator/parser"
+	"github.com/xyloni/tdm-light-orchestrator/twitch"
 )
+
+func TestLotRegistrationKeepsSampleOutOfPersistentState(t *testing.T) {
+	s := testScheduler(t, time.Now())
+	ref := "0123456789abcdef01234567"
+	s.state.LotCredentials = map[string]parser.Account{"short": {Login: "short", UserID: "21", OAuth: "existing-fixture"}}
+	s.state.LotSold = map[string]bool{lotAccountReceipt("id", "51"): true}
+	sample := []lotSampleAccount{{Login: "short"}, {Login: "full", UserID: "37", OAuth: "temporary-fixture", DeviceID: "device"}, {Login: "sold", UserID: "51", OAuth: "sold-fixture", DeviceID: "device"}}
+	if !validLotSample(sample) {
+		t.Fatal("valid sample rejected")
+	}
+	if err := s.registerLotTitle(ref, "test listing", sample); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	accounts := s.credentialsForLotSample(ref, s.lotSamples[ref].accounts)
+	s.mu.Unlock()
+	if len(accounts) != 2 || accounts[0].OAuth != "existing-fixture" || accounts[1].UserID != "37" {
+		t.Fatal("incorrect stock account selection")
+	}
+	saved, err := os.ReadFile(s.path)
+	if err != nil || strings.Contains(string(saved), "temporary-fixture") || strings.Contains(string(saved), "sold-fixture") {
+		t.Fatal("sample leaked into persisted state")
+	}
+	if len(s.state.LotAccounts) > 0 || len(s.state.ManagedLots) > 0 {
+		t.Fatal("registration moved an account or saved a bundle")
+	}
+}
+
+func TestLotSearchFindsPastCampaignAndKeepsInventoryResultsDistinct(t *testing.T) {
+	s := testScheduler(t, time.Now())
+	s.state.Games["sea of thieves"] = &gameState{Name: "Sea of Thieves", Campaigns: map[string]*campaign{
+		"past": {ID: "past", Name: "Season 21 Drops 3", Ends: time.Now().Add(-time.Hour), Rewards: []rewardRequirement{{ID: "old-reward", Name: "Reward"}}},
+	}}
+	count, err := s.discoverLotCampaigns("SEASON 21 DROPS 3", "")
+	if err != nil || count != 1 || s.state.LotCatalog["past"].Rewards[0].ID != "old-reward" {
+		t.Fatalf("historical match count=%d error=%v", count, err)
+	}
+	item := twitch.LotCampaign{ID: "inventory", Name: "Earlier campaign", TimeBasedDrops: []twitch.LotCampaignDrop{{ID: "first", Name: "First"}}}
+	item.Game.Name = "Sea of Thieves"
+	if count, err = s.importLotCampaigns("EARLIER", []twitch.LotCampaign{item}, true); err != nil || count != 1 {
+		t.Fatalf("inventory import count=%d error=%v", count, err)
+	}
+	item.TimeBasedDrops = []twitch.LotCampaignDrop{{ID: "second", Name: "Second"}}
+	if count, err = s.importLotCampaigns("Sea of Thieves", []twitch.LotCampaign{item}, true); err != nil || count != 1 {
+		t.Fatalf("second inventory import count=%d error=%v", count, err)
+	}
+	if got := s.state.LotCatalog["inventory"]; !got.InventoryOnly || len(got.Rewards) != 2 {
+		t.Fatalf("incorrect merged entry %+v", got)
+	}
+}
 
 func TestTelegramLotBundleSelectsRewardsWithoutIDs(t *testing.T) {
 	s := testScheduler(t, time.Now())
