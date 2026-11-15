@@ -53,6 +53,19 @@ func (s *scheduler) serveLotPreview(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if r.Method == http.MethodGet {
+		s.mu.Lock()
+		selection := s.state.LotPreview
+		s.mu.Unlock()
+		if len(selection.Campaigns) == 0 {
+			http.Error(w, "no saved selection", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(selection)
+		return
+	}
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return

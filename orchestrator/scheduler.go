@@ -34,6 +34,7 @@ type activeGame struct {
 }
 
 type scheduler struct {
+	lotPreviewDraft  lotPreviewSelection
 	claimCtx         context.Context
 	claimJobs        map[string]*claimJob
 	partialExport    partialGroupExport

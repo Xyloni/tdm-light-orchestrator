@@ -8,6 +8,7 @@ import (
 
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -71,6 +72,34 @@ func runOnce(parent context.Context, dir, address string) error {
 	}
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second}
 	defer server.Close()
+	if path := os.Getenv("ORCHESTRATOR_CARDINAL_SOCKET"); path != "" {
+		cardinalListener, err := net.Listen("unix", path)
+		if err != nil {
+			return fmt.Errorf("Cardinal socket: %w", err)
+		}
+		defer cardinalListener.Close()
+		if err := os.Chmod(path, 0660); err != nil {
+			return fmt.Errorf("Cardinal socket permissions: %w", err)
+		}
+		cardinalServer := &http.Server{
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/internal/lot-preview" {
+					http.NotFound(w, r)
+					return
+				}
+				s.serveLotPreview(w, r)
+			}),
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       20 * time.Second,
+			WriteTimeout:      20 * time.Second,
+		}
+		defer cardinalServer.Close()
+		go func() {
+			if err := cardinalServer.Serve(cardinalListener); !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("Cardinal socket: %v", err)
+			}
+		}()
+	}
 	webDone := make(chan error, 1)
 	botCtx, stopBots := context.WithCancel(ctx)
 	botsDone := make(chan struct{})

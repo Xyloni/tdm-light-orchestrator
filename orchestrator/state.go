@@ -67,6 +67,7 @@ type campaign struct {
 }
 
 type state struct {
+	LotPreview            lotPreviewSelection `json:",omitzero"`
 	TelegramMenu          telegramMenuState
 	Digest                digestSettings
 	Stats                 statistics
