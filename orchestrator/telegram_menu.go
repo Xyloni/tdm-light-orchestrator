@@ -26,7 +26,11 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 	}
 	kind, exportValue, _ := strings.Cut(action, ":")
 	switch kind {
-	case "lot-preview", "lot-preview-game", "lot-toggle", "lot-preview-page", "lot-preview-save":
+	case "managed-lots":
+		return s.telegramManagedLots()
+	case "lot-catalog-page":
+		return s.telegramLotCatalog(exportValue)
+	case "lot-preview", "lot-preview-games", "lot-preview-game", "lot-toggle", "lot-preview-page", "lot-preview-save":
 		return s.telegramLotPreview(kind, exportValue)
 	case "game-claims", "claim-scan-confirm":
 		return s.telegramClaims(kind, exportValue)
@@ -81,7 +85,7 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		row(button("Статистика", "stats"), button("Уведомления", "notifications"))
 		row(button("Нагрузка", "system-load"), button("📁 Скачать логи", "logs"))
 		row(button("Настройки", "settings"), button("Справка", "help"))
-		row(button("Предпросмотр лота", "lot-preview"))
+		row(button("🏷 Лоты", "managed-lots"))
 		return panel
 	case "quarantine":
 		panel.Text = s.command("quarantine")

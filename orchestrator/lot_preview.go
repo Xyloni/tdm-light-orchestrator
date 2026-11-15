@@ -45,17 +45,29 @@ func inspectLotInventory(required []lotReward, drops []twitch.Drop) lotInventory
 	return result
 }
 
-func (s *scheduler) serveLotPreview(w http.ResponseWriter, r *http.Request) {
+func authorizedLotRequest(r *http.Request) bool {
 	token := os.Getenv("ORCHESTRATOR_LOT_PREVIEW_TOKEN")
-	value, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	value, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	expected, actual := sha256.Sum256([]byte(token)), sha256.Sum256([]byte(value))
-	if len(token) < 32 || subtle.ConstantTimeCompare(expected[:], actual[:]) != 1 {
+	return bearer && len(token) >= 32 && subtle.ConstantTimeCompare(expected[:], actual[:]) == 1
+}
+
+func (s *scheduler) serveLotPreview(w http.ResponseWriter, r *http.Request) {
+	if !authorizedLotRequest(r) {
 		http.NotFound(w, r)
 		return
 	}
 	if r.Method == http.MethodGet {
+		ref := r.URL.Query().Get("lot")
+		if ref != "" && !validLotRef(ref) {
+			http.Error(w, "invalid lot reference", http.StatusBadRequest)
+			return
+		}
 		s.mu.Lock()
-		selection := s.state.LotPreview
+		selection := s.state.LotPreviews[ref]
+		if ref == "" {
+			selection = s.state.LotPreview
+		}
 		s.mu.Unlock()
 		if len(selection.Campaigns) == 0 {
 			http.Error(w, "no saved selection", http.StatusNotFound)

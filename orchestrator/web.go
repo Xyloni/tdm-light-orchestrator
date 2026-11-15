@@ -314,6 +314,10 @@ func webHandler(s *scheduler) (http.Handler, error) {
 			s.serveLotPreview(w, r)
 			return
 		}
+		if r.URL.Path == "/internal/managed-lot" {
+			s.serveManagedLot(w, r)
+			return
+		}
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return

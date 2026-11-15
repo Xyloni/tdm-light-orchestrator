@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strconv"
@@ -14,6 +15,14 @@ type lotPreviewSelection struct {
 	Campaigns []string
 }
 
+func validLotRef(ref string) bool {
+	if len(ref) != 24 {
+		return false
+	}
+	_, err := hex.DecodeString(ref)
+	return err == nil
+}
+
 func (s *scheduler) telegramLotPreview(kind, value string) bot.SettingsPanel {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -22,9 +31,24 @@ func (s *scheduler) telegramLotPreview(kind, value string) bot.SettingsPanel {
 		panel.Buttons = append(panel.Buttons, []bot.SettingsButton{{Label: label, Action: action}})
 	}
 	if kind == "lot-preview" {
-		s.lotPreviewDraft = lotPreviewSelection{}
-		saved := s.state.LotPreview
-		panel.Text = "Выберите игру для предпросмотра лота Cardinal."
+		panel.Text = fmt.Sprintf("Сохранено привязок: %d. Открой лот в Cardinal и скопируй его код.", len(s.state.LotPreviews))
+		row("Привязать или изменить лот", "prompt:lot-link")
+		row("В меню", "menu")
+		return panel
+	}
+	if kind == "lot-preview-link" || kind == "lot-preview-games" {
+		if kind == "lot-preview-link" {
+			s.lotPreviewRef = value
+			s.lotPreviewDraft = lotPreviewSelection{}
+			value = ""
+		}
+		if !validLotRef(s.lotPreviewRef) {
+			panel.Text = "Открой привязку заново."
+			row("К привязкам", "lot-preview")
+			return panel
+		}
+		saved := s.state.LotPreviews[s.lotPreviewRef]
+		panel.Text = "Выберите игру для лота " + s.lotPreviewRef + "."
 		if len(saved.Campaigns) > 0 {
 			panel.Text += fmt.Sprintf("\nСохранено: %s · кампаний: %d.", saved.Game, len(saved.Campaigns))
 		}
@@ -42,10 +66,10 @@ func (s *scheduler) telegramLotPreview(kind, value string) bot.SettingsPanel {
 			row(s.state.Games[key].Name, "lot-preview-game:"+gameRef(key))
 		}
 		if page > 0 {
-			row("Предыдущая", fmt.Sprintf("lot-preview:%d", page-1))
+			row("Предыдущая", fmt.Sprintf("lot-preview-games:%d", page-1))
 		}
 		if end < len(keys) {
-			row("Следующая", fmt.Sprintf("lot-preview:%d", page+1))
+			row("Следующая", fmt.Sprintf("lot-preview-games:%d", page+1))
 		}
 		row("В меню", "menu")
 		return panel
@@ -57,12 +81,12 @@ func (s *scheduler) telegramLotPreview(kind, value string) bot.SettingsPanel {
 		}
 		if kind == "lot-preview-game" {
 			s.lotPreviewDraft = lotPreviewSelection{Game: g.Name}
-			if s.state.LotPreview.Game == g.Name {
-				s.lotPreviewDraft.Campaigns = slices.Clone(s.state.LotPreview.Campaigns)
+			if saved := s.state.LotPreviews[s.lotPreviewRef]; saved.Game == g.Name {
+				s.lotPreviewDraft.Campaigns = slices.Clone(saved.Campaigns)
 			}
 		}
 		draft := &s.lotPreviewDraft
-		if draft.Game != g.Name {
+		if !validLotRef(s.lotPreviewRef) || draft.Game != g.Name {
 			break
 		}
 		pageText, campaignRef, _ := strings.Cut(arg, ":")
@@ -79,12 +103,19 @@ func (s *scheduler) telegramLotPreview(kind, value string) bot.SettingsPanel {
 			}
 		}
 		if kind == "lot-preview-save" && len(draft.Campaigns) > 0 {
-			previous := s.state.LotPreview
-			s.state.LotPreview = lotPreviewSelection{Game: g.Name, Campaigns: slices.Clone(draft.Campaigns)}
+			if s.state.LotPreviews == nil {
+				s.state.LotPreviews = make(map[string]lotPreviewSelection)
+			}
+			previous, existed := s.state.LotPreviews[s.lotPreviewRef]
+			s.state.LotPreviews[s.lotPreviewRef] = lotPreviewSelection{Game: g.Name, Campaigns: slices.Clone(draft.Campaigns)}
 			if s.persist() {
 				panel.Text = "Выбор сохранён.\n\n"
 			} else {
-				s.state.LotPreview = previous
+				if existed {
+					s.state.LotPreviews[s.lotPreviewRef] = previous
+				} else {
+					delete(s.state.LotPreviews, s.lotPreviewRef)
+				}
 				panel.Text = s.notice + "\n\n"
 			}
 		}
@@ -116,7 +147,7 @@ func (s *scheduler) telegramLotPreview(kind, value string) bot.SettingsPanel {
 		if len(draft.Campaigns) > 0 {
 			row("Сохранить выбор", fmt.Sprintf("lot-preview-save:%s:%d", ref, page))
 		}
-		row("К выбору игры", "lot-preview")
+		row("К выбору игры", "lot-preview-games")
 		return panel
 	}
 	panel.Text = "Откройте выбор игры заново."

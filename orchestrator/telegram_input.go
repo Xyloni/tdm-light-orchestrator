@@ -12,20 +12,24 @@ import (
 func telegramPrompt(input string) bot.SettingsPanel {
 	kind, ref, _ := strings.Cut(input, ":")
 	prompts := map[string]struct{ title, text, back string }{
-		"find":     {"🔎 Поиск игры", "Отправьте одним сообщением: целевой размер пула, затем часть названия игры. После поиска бот предложит выбрать точную категорию.\n\nПример: 100 Hitman", "games"},
-		"add":      {"🎮 Добавление игры", "Отправьте одним сообщением: целевой размер пула, затем точное название категории Twitch.\n\nПример: 100 HITMAN World of Assassination", "games"},
-		"simulate": {"🧪 Симулятор расписания", "Отправьте один сценарий. Разделите части знаком |.\n\nПервая часть: число слотов и общий лимит аккаунтов.\nКаждая следующая: аккаунты, минуты на группу и минуты до дедлайна.\n\nПример: 1 20 | 30 30 90 | 20 45 120", "settings"},
-		"digest":   {"🔔 Время суточной сводки", "Отправьте время в формате ЧЧ:ММ по часовому поясу сервера. Чтобы выключить сводку, отправьте off.\n\nПример: 21:00", "notifications"},
-		"limits":   {"⚙️ Лимиты", "Отправьте два числа в одном сообщении, через пробел.\n\n1. Сколько игр может работать одновременно.\n2. Общий лимит работающих аккаунтов.\n\nПример: 2 1000", "settings"},
-		"timing":   {"🗓 Расписание", "Отправьте три числа в одном сообщении, через пробел.\n\n1. Резерв на всю кампанию — минуты (1–1440).\n2. Скорость начисления — проценты (1–100).\n3. Интервал поиска кампаний — секунды (15–86400).\n\nПример: 10 75 120", "settings"},
-		"assign":   {"👥 Закрепление аккаунта", "Отправьте логин аккаунта и точное название игры через пробел.\n\nПример: my_login HITMAN World of Assassination", "accounts"},
-		"policy":   {"⚙️ Правила игры", "Отправьте режим и запас в минутах через пробел.\n\nРежим: default — общий, speed — скорость, resources — экономия.\nЗапас: 0 — общий, 1–1440 — свой.\n\nПример: resources 20", "game:" + ref},
-		"upload":   {"📎 Загрузка в пул игры", "Прикрепите .txt как документ в течение пяти минут. Аккаунты будут добавлены в пул выбранной игры.", "game:" + ref},
-		"free":     {"👥 Возврат в свободный пул", "Отправьте только логин Twitch.\n\nПример: my_login", "accounts"},
-		"partial":  {"📤 Снять часть группы", "Отправьте число аккаунтов, которые нужно забрать. Покажем выборку по прогнозу времени до завершения.", "game-pool:" + ref},
-		"target":   {"👥 Целевой размер пула", "Отправьте одно положительное число.\n\nПример: 100", "game:" + ref},
-		"exclude":  {"🎁 Исключение награды", "Отправьте полное название награды одним сообщением. Регистр не важен.\n\nПример: Royal Purple Banana", "game:" + ref},
-		"include":  {"🎁 Возврат награды в фарм", "Отправьте полное название исключённой награды одним сообщением.\n\nПример: Royal Purple Banana", "game:" + ref},
+		"lot-catalog":  {"🏷 Кампания в каталоге лотов", "Отправьте название игры первой строкой. Второй строкой — ID кампании | название. Затем по одному дропу на строку — ID награды | название.\n\nПример\nWar Thunder\n123 | WTCS Finals\n456 | Supply Crate\n\nЕсли известен точный срок для всей кампании, добавьте строку: Срок | 2026-11-23T18:00:00+03:00 | HTTPS-ссылка на правило.", "managed-lots"},
+		"lot-discover": {"🔎 Кампании Twitch", "Отправьте точное название категории Twitch. Найденные кампании появятся в каталоге лотов с ID кампаний и наград. Игра не будет добавлена в фарм.", "managed-lots"},
+		"lot-bundle":   {"🏷 Состав лота", "Первая строка — код лота из Cardinal. Дальше по одной кампании на строку. Для полной кампании укажите её ID. Для части кампании добавьте после ID через пробел только нужные ID наград.\n\nПример\nкод лота\n123\n789 456 457", "managed-lots"},
+		"lot-link":     {"Привязка лота", "Скопируй код из карточки лота в боте Cardinal и отправь сюда.", "lot-preview"},
+		"find":         {"🔎 Поиск игры", "Отправьте одним сообщением: целевой размер пула, затем часть названия игры. После поиска бот предложит выбрать точную категорию.\n\nПример: 100 Hitman", "games"},
+		"add":          {"🎮 Добавление игры", "Отправьте одним сообщением: целевой размер пула, затем точное название категории Twitch.\n\nПример: 100 HITMAN World of Assassination", "games"},
+		"simulate":     {"🧪 Симулятор расписания", "Отправьте один сценарий. Разделите части знаком |.\n\nПервая часть: число слотов и общий лимит аккаунтов.\nКаждая следующая: аккаунты, минуты на группу и минуты до дедлайна.\n\nПример: 1 20 | 30 30 90 | 20 45 120", "settings"},
+		"digest":       {"🔔 Время суточной сводки", "Отправьте время в формате ЧЧ:ММ по часовому поясу сервера. Чтобы выключить сводку, отправьте off.\n\nПример: 21:00", "notifications"},
+		"limits":       {"⚙️ Лимиты", "Отправьте два числа в одном сообщении, через пробел.\n\n1. Сколько игр может работать одновременно.\n2. Общий лимит работающих аккаунтов.\n\nПример: 2 1000", "settings"},
+		"timing":       {"🗓 Расписание", "Отправьте три числа в одном сообщении, через пробел.\n\n1. Резерв на всю кампанию — минуты (1–1440).\n2. Скорость начисления — проценты (1–100).\n3. Интервал поиска кампаний — секунды (15–86400).\n\nПример: 10 75 120", "settings"},
+		"assign":       {"👥 Закрепление аккаунта", "Отправьте логин аккаунта и точное название игры через пробел.\n\nПример: my_login HITMAN World of Assassination", "accounts"},
+		"policy":       {"⚙️ Правила игры", "Отправьте режим и запас в минутах через пробел.\n\nРежим: default — общий, speed — скорость, resources — экономия.\nЗапас: 0 — общий, 1–1440 — свой.\n\nПример: resources 20", "game:" + ref},
+		"upload":       {"📎 Загрузка в пул игры", "Прикрепите .txt как документ в течение пяти минут. Аккаунты будут добавлены в пул выбранной игры.", "game:" + ref},
+		"free":         {"👥 Возврат в свободный пул", "Отправьте только логин Twitch.\n\nПример: my_login", "accounts"},
+		"partial":      {"📤 Снять часть группы", "Отправьте число аккаунтов, которые нужно забрать. Покажем выборку по прогнозу времени до завершения.", "game-pool:" + ref},
+		"target":       {"👥 Целевой размер пула", "Отправьте одно положительное число.\n\nПример: 100", "game:" + ref},
+		"exclude":      {"🎁 Исключение награды", "Отправьте полное название награды одним сообщением. Регистр не важен.\n\nПример: Royal Purple Banana", "game:" + ref},
+		"include":      {"🎁 Возврат награды в фарм", "Отправьте полное название исключённой награды одним сообщением.\n\nПример: Royal Purple Banana", "game:" + ref},
 	}
 	prompt, ok := prompts[kind]
 	if !ok {
@@ -35,6 +39,11 @@ func telegramPrompt(input string) bot.SettingsPanel {
 }
 
 func (s *scheduler) inputPrompt(input string) bot.SettingsPanel {
+	if input == "upload:lot-credentials" {
+		return bot.SettingsPanel{Title: "📎 Аккаунты для лотов", Input: input,
+			Text:    "Прикрепите полный TXT как документ. По этим данным оркестратор сможет проверить лот, даже если в Cardinal только логин и пароль. Аккаунты сохранятся в разделе лотов.",
+			Buttons: [][]bot.SettingsButton{{{Label: "⬅️ К лотам", Action: "managed-lots"}}}}
+	}
 	panel := telegramPrompt(input)
 	kind, ref, _ := strings.Cut(input, ":")
 	s.mu.Lock()
@@ -80,6 +89,9 @@ func validTelegramNumbers(fields []string, minimum, maximum []int) bool {
 }
 
 func (s *scheduler) telegramUpload(ref string, data []byte) error {
+	if ref == "lot-credentials" {
+		return s.uploadLotCredentials(data)
+	}
 	s.mu.Lock()
 	var key string
 	for candidate := range s.state.Games {
@@ -103,6 +115,30 @@ func (s *scheduler) telegramInput(input, text string) bot.SettingsPanel {
 		return panel
 	}
 	fields := strings.Fields(text)
+	if kind == "lot-discover" {
+		count, err := s.discoverLotCampaigns(text)
+		if err != nil {
+			return retry(err.Error())
+		}
+		panel := s.telegramLotCatalog("0")
+		panel.Text = fmt.Sprintf("Новых кампаний добавлено: %d.\n\n%s", count, panel.Text)
+		return panel
+	}
+	if kind == "lot-catalog" || kind == "lot-bundle" {
+		if err := s.saveManagedLotInput(kind, text); err != nil {
+			return retry(err.Error())
+		}
+		panel := s.telegramManagedLots()
+		panel.Text = "Сохранено.\n\n" + panel.Text
+		return panel
+	}
+	if kind == "lot-link" {
+		ref := strings.ToLower(strings.TrimSpace(text))
+		if !validLotRef(ref) {
+			return retry("Нужен код лота из Cardinal.")
+		}
+		return s.telegramLotPreview("lot-preview-link", ref)
+	}
 	switch kind {
 	case "limits":
 		if !validTelegramNumbers(fields, []int{1, 1}, nil) {

@@ -383,6 +383,22 @@ func (s *scheduler) applyUpload(data []byte, game string, commit bool) error {
 	}
 	for _, g := range groups {
 		for _, a := range g {
+			if s.state.LotSold[lotAccountReceipt("login", a.Login)] || s.state.LotSold[lotAccountReceipt("id", a.UserID)] {
+				return fmt.Errorf("аккаунт %s отмечен как проданный", a.Login)
+			}
+			if _, held := s.state.LotAccounts[a.Login]; held || s.state.LotCredentials[a.Login].Login != "" {
+				return fmt.Errorf("аккаунт %s находится в модуле лотов", a.Login)
+			}
+			for _, entry := range s.state.LotAccounts {
+				if entry.Credentials.UserID == a.UserID {
+					return fmt.Errorf("Twitch user ID аккаунта %s находится в модуле лотов", a.Login)
+				}
+			}
+			for _, entry := range s.state.LotCredentials {
+				if entry.UserID == a.UserID {
+					return fmt.Errorf("Twitch user ID аккаунта %s находится в модуле лотов", a.Login)
+				}
+			}
 			if login := byID[a.UserID]; login != "" && login != a.Login {
 				return fmt.Errorf("Twitch user ID уже закреплён за %s", login)
 			}

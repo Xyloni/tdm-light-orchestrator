@@ -83,11 +83,14 @@ func runOnce(parent context.Context, dir, address string) error {
 		}
 		cardinalServer := &http.Server{
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/internal/lot-preview" {
+				switch r.URL.Path {
+				case "/internal/lot-preview":
+					s.serveLotPreview(w, r)
+				case "/internal/managed-lot":
+					s.serveManagedLot(w, r)
+				default:
 					http.NotFound(w, r)
-					return
 				}
-				s.serveLotPreview(w, r)
 			}),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       20 * time.Second,

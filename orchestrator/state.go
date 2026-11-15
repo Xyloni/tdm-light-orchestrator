@@ -67,7 +67,14 @@ type campaign struct {
 }
 
 type state struct {
-	LotPreview            lotPreviewSelection `json:",omitzero"`
+	LotCatalog            map[string]lotCatalogCampaign  `json:",omitempty"`
+	ManagedLots           map[string]managedLot          `json:",omitempty"`
+	LotAccounts           map[string]lotAccount          `json:",omitempty"`
+	LotCredentials        map[string]parser.Account      `json:",omitempty"`
+	LotSold               map[string]bool                `json:",omitempty"`
+	LotReceipts           map[string]string              `json:",omitempty"`
+	LotPreview            lotPreviewSelection            `json:",omitzero"`
+	LotPreviews           map[string]lotPreviewSelection `json:",omitempty"`
 	TelegramMenu          telegramMenuState
 	Digest                digestSettings
 	Stats                 statistics
