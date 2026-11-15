@@ -31,7 +31,7 @@ func (s *scheduler) telegramManagedLots() bot.SettingsPanel {
 	return bot.SettingsPanel{Title: "🏷 Лоты", Text: text, Buttons: [][]bot.SettingsButton{
 		{{Label: "📚 Каталог", Action: "lot-catalog-page:0"}, {Label: "➕ Добавить кампанию", Action: "prompt:lot-catalog"}},
 		{{Label: "🔎 Загрузить кампании из Twitch", Action: "prompt:lot-discover"}},
-		{{Label: "📋 Состав лота", Action: "prompt:lot-bundle"}},
+		{{Label: "📋 Состав лота", Action: "lb-list:0"}},
 		{{Label: "📎 Загрузить аккаунты лотов", Action: "prompt:upload:lot-credentials"}},
 		{{Label: "🔎 Ручной предпросмотр", Action: "lot-preview"}},
 		{{Label: "🏠 В меню", Action: "menu"}},
@@ -157,13 +157,17 @@ func (s *scheduler) saveManagedLotInput(kind, text string) error {
 		return fmt.Errorf("не удалось сохранить каталог")
 	}
 	ref := strings.ToLower(strings.TrimSpace(lines[0]))
-	if len(lines) < 2 || len(lines) > 21 || !validLotRef(ref) {
+	return s.saveLotBundleLocked(ref, lines[1:])
+}
+
+func (s *scheduler) saveLotBundleLocked(ref string, campaigns []string) error {
+	if len(campaigns) < 1 || len(campaigns) > 20 || !validLotRef(ref) {
 		return fmt.Errorf("укажите код лота и от 1 до 20 кампаний")
 	}
 	lot := managedLot{Benefits: make(map[string][]string)}
 	allDeadlines := true
 	seen := make(map[string]bool)
-	for _, line := range lines[1:] {
+	for _, line := range campaigns {
 		fields := strings.Fields(line)
 		if len(fields) == 0 || seen[fields[0]] {
 			return fmt.Errorf("укажите каждую кампанию один раз")
@@ -282,6 +286,8 @@ func (s *scheduler) discoverLotCampaigns(game string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("Twitch не подтвердил каталог. Повторите поиск или добавьте кампанию вручную")
 	}
+	query := strings.ToLower(game)
+	exactGame := slices.ContainsFunc(campaigns, func(c twitch.LotCampaign) bool { return strings.EqualFold(c.Game.Name, game) })
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous := s.state.LotCatalog
@@ -291,7 +297,8 @@ func (s *scheduler) discoverLotCampaigns(game string) (int, error) {
 	}
 	added := 0
 	for _, campaign := range campaigns {
-		if !strings.EqualFold(campaign.Game.Name, game) || !validLotID(campaign.ID) || len(campaign.TimeBasedDrops) == 0 {
+		name := strings.ToLower(campaign.Game.Name)
+		if (exactGame && name != query) || !strings.Contains(name, query) || !validLotID(campaign.ID) || len(campaign.TimeBasedDrops) == 0 {
 			continue
 		}
 		if _, exists := catalog[campaign.ID]; exists {

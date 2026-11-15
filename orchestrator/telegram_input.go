@@ -12,6 +12,8 @@ import (
 func telegramPrompt(input string) bot.SettingsPanel {
 	kind, ref, _ := strings.Cut(input, ":")
 	prompts := map[string]struct{ title, text, back string }{
+		"lb-code":      {"📋 Код лота", "В карточке лота в Cardinal нажмите «Скопировать код», затем вставьте его сюда.", "lb-list:0"},
+		"lb-find":      {"🔎 Кампании Twitch", "Отправьте название игры или его часть. Найденные кампании появятся в списке игр.", "lb:" + ref + ":games:0"},
 		"lot-catalog":  {"🏷 Кампания в каталоге лотов", "Отправьте название игры первой строкой. Второй строкой — ID кампании | название. Затем по одному дропу на строку — ID награды | название.\n\nПример\nWar Thunder\n123 | WTCS Finals\n456 | Supply Crate\n\nЕсли известен точный срок для всей кампании, добавьте строку: Срок | 2026-11-23T18:00:00+03:00 | HTTPS-ссылка на правило.", "managed-lots"},
 		"lot-discover": {"🔎 Кампании Twitch", "Отправьте точное название категории Twitch. Найденные кампании появятся в каталоге лотов с ID кампаний и наград. Игра не будет добавлена в фарм.", "managed-lots"},
 		"lot-bundle":   {"🏷 Состав лота", "Первая строка — код лота из Cardinal. Дальше по одной кампании на строку. Для полной кампании укажите её ID. Для части кампании добавьте после ID через пробел только нужные ID наград.\n\nПример\nкод лота\n123\n789 456 457", "managed-lots"},
@@ -115,6 +117,26 @@ func (s *scheduler) telegramInput(input, text string) bot.SettingsPanel {
 		return panel
 	}
 	fields := strings.Fields(text)
+	if kind == "lb-code" {
+		lot := strings.ToLower(strings.TrimSpace(text))
+		if !validLotRef(lot) {
+			return retry("Вставьте код из карточки Cardinal.")
+		}
+		return s.telegramLotBundle("lb-open", lot)
+	}
+	if kind == "lb-find" {
+		count, err := s.discoverLotCampaigns(text)
+		if err != nil {
+			return retry(err.Error())
+		}
+		panel := s.telegramLotBundle("lb", ref+":games:0")
+		if count > 0 {
+			panel.Text = fmt.Sprintf("Добавлено кампаний: %d.\n\n%s", count, panel.Text)
+		} else {
+			panel.Text = "Новых кампаний нет. Проверьте название или выберите игру из списка.\n\n" + panel.Text
+		}
+		return panel
+	}
 	if kind == "lot-discover" {
 		count, err := s.discoverLotCampaigns(text)
 		if err != nil {

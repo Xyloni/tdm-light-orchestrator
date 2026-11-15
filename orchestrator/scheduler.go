@@ -34,6 +34,7 @@ type activeGame struct {
 }
 
 type scheduler struct {
+	lotBundleDraft   *lotBundleDraft
 	lotPreviewDraft  lotPreviewSelection
 	lotPreviewRef    string
 	claimCtx         context.Context

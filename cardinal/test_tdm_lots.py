@@ -12,6 +12,15 @@ import tdm_lot_preview as plugin
 
 
 class ManagedLotsTest(unittest.TestCase):
+    def test_lot_code_button_sends_exact_code(self):
+        class LegacyButton:
+            def __init__(self, text):
+                self.text = text
+
+        ref = "0123456789abcdef01234567"
+        button = plugin.lot_code_button(LegacyButton, ref)
+        self.assertEqual(button.to_dict(), {"text": "📋 Скопировать код", "copy_text": {"text": ref}})
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

@@ -28,6 +28,8 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 	switch kind {
 	case "managed-lots":
 		return s.telegramManagedLots()
+	case "lb-list", "lb-open", "lb", "lb-confirm":
+		return s.telegramLotBundle(kind, exportValue)
 	case "lot-catalog-page":
 		return s.telegramLotCatalog(exportValue)
 	case "lot-preview", "lot-preview-games", "lot-preview-game", "lot-toggle", "lot-preview-page", "lot-preview-save":

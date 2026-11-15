@@ -29,6 +29,7 @@ type lotAccount struct {
 
 type managedLotRequest struct {
 	Operation, Lot, Login, AccountLine string
+	Title                              string
 }
 
 func (s *scheduler) uploadLotCredentials(data []byte) error {
@@ -283,7 +284,24 @@ func (s *scheduler) serveManagedLot(w http.ResponseWriter, r *http.Request) {
 	}
 	var req managedLotRequest
 	r.Body = http.MaxBytesReader(w, r.Body, 8192)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !validLotRef(req.Lot) || !validLotLogin(req.Login) ||
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !validLotRef(req.Lot) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if req.Operation == "register" {
+		digest := sha256.Sum256([]byte(req.Title))
+		if req.Lot != fmt.Sprintf("%x", digest[:12]) || strings.TrimSpace(req.Title) == "" || req.AccountLine != "" || req.Login != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if err := s.registerLotTitle(req.Lot, brief(strings.Join(strings.Fields(req.Title), " "), 160)); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"state": "registered"})
+		return
+	}
+	if !validLotLogin(req.Login) ||
 		(req.Operation != "inspect" && req.Operation != "preview" && req.Operation != "release" && req.Operation != "sold") ||
 		(req.AccountLine != "" && req.Operation != "inspect" && req.Operation != "preview") {
 		w.WriteHeader(http.StatusBadRequest)
