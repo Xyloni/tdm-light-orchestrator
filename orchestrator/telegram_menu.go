@@ -32,6 +32,8 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		return s.telegramLotBundle(kind, exportValue)
 	case "lot-catalog-page":
 		return s.telegramLotCatalog(exportValue)
+	case "lot-catalog-remove", "lot-catalog-remove-confirm", "lot-catalog-remove-cancel":
+		return s.telegramLotCatalogRemoval(kind, exportValue, time.Now())
 	case "lot-preview", "lot-preview-games", "lot-preview-game", "lot-toggle", "lot-preview-page", "lot-preview-save":
 		return s.telegramLotPreview(kind, exportValue)
 	case "game-claims", "claim-scan-confirm":

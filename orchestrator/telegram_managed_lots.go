@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -38,65 +37,6 @@ func (s *scheduler) telegramManagedLots() bot.SettingsPanel {
 		{{Label: "🔎 Ручной предпросмотр", Action: "lot-preview"}},
 		{{Label: "🏠 В меню", Action: "menu"}},
 	}}
-}
-
-func (s *scheduler) telegramLotCatalog(value string) bot.SettingsPanel {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	panel := bot.SettingsPanel{Title: "📚 Каталог лотов"}
-	row := func(label, action string) {
-		panel.Buttons = append(panel.Buttons, []bot.SettingsButton{{Label: label, Action: action}})
-	}
-	ids := make([]string, 0, len(s.state.LotCatalog))
-	for id := range s.state.LotCatalog {
-		ids = append(ids, id)
-	}
-	slices.SortFunc(ids, func(a, b string) int {
-		left, right := s.state.LotCatalog[a], s.state.LotCatalog[b]
-		return strings.Compare(left.Game+" "+left.Name+" "+a, right.Game+" "+right.Name+" "+b)
-	})
-	if page, err := strconv.Atoi(value); err == nil {
-		page = min(max(0, page), max(0, len(ids)-1)/8)
-		end := min(len(ids), (page+1)*8)
-		for _, id := range ids[page*8 : end] {
-			item := s.state.LotCatalog[id]
-			row(brief(item.Game+" · "+item.Name, 52), "lot-catalog-page:c"+gameRef(id))
-		}
-		panel.Text = "Выберите кампанию, чтобы увидеть ID и состав наград."
-		if len(ids) == 0 {
-			panel.Text = "Каталог пока пуст."
-		}
-		if page > 0 {
-			row("⬅️ Назад", fmt.Sprintf("lot-catalog-page:%d", page-1))
-		}
-		if end < len(ids) {
-			row("➡️ Дальше", fmt.Sprintf("lot-catalog-page:%d", page+1))
-		}
-	} else {
-		for _, id := range ids {
-			if value != "c"+gameRef(id) {
-				continue
-			}
-			item := s.state.LotCatalog[id]
-			var text strings.Builder
-			fmt.Fprintf(&text, "%s · %s\nID кампании — %s\n\n", item.Game, item.Name, id)
-			if item.InventoryOnly {
-				text.WriteString("Из инвентаря аккаунта. Сверьте количество наград с составом лота.\n\n")
-			}
-			for _, reward := range item.Rewards {
-				fmt.Fprintf(&text, "• %s — %s\n", brief(reward.Name, 50), reward.ID)
-			}
-			if item.VerifiedExpires != nil {
-				fmt.Fprintf(&text, "\nПодтверждённый срок · %s", item.VerifiedExpires.Format(time.RFC3339))
-			}
-			panel.Text = text.String()
-			break
-		}
-		row("⬅️ К каталогу", "lot-catalog-page:0")
-	}
-	row("➕ Добавить кампанию", "prompt:lot-catalog")
-	row("🏷 К лотам", "managed-lots")
-	return panel
 }
 
 func (s *scheduler) saveManagedLotInput(kind, text string) error {
