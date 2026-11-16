@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -70,34 +71,71 @@ func TestTelegramLotCatalogDeletesCampaignOrGame(t *testing.T) {
 	}
 }
 
-func TestTelegramLotCatalogRechecksSavedLotsAtConfirmation(t *testing.T) {
+func TestTelegramLotCatalogDeletionPreservesSavedBundle(t *testing.T) {
 	s := testScheduler(t, time.Now())
-	addCatalogFixture(t, s, "Game A", "one", "First campaign")
+	if err := s.saveManagedLotInput("lot-catalog", "Game A\none | First campaign\nfirst | First reward\nsecond | Second reward"); err != nil {
+		t.Fatal(err)
+	}
+	campaign := s.state.LotCatalog["one"]
+	campaign.Benefits = map[string][]string{"second": {"benefit"}}
+	s.state.LotCatalog["one"] = campaign
 	game := s.telegramMenu(catalogAction(t, s.telegramMenu("lot-catalog-page:0"), "Game A"))
-	campaign := s.telegramMenu(catalogAction(t, game, "First campaign"))
-	deleteCampaign := catalogAction(t, campaign, "Удалить кампанию из каталога")
-	confirm := catalogAction(t, s.telegramMenu(deleteCampaign), "Подтвердить удаление")
+	deleteGame := catalogAction(t, game, "Удалить игру из каталога")
+	confirm := catalogAction(t, s.telegramMenu(deleteGame), "Подтвердить удаление")
 
 	const ref = "0123456789abcdef01234567"
 	const title = "Example listing"
 	if err := s.registerLotTitle(ref, title, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveManagedLotInput("lot-bundle", ref+"\none"); err != nil {
+	if err := s.saveManagedLotInput("lot-bundle", ref+"\none second"); err != nil {
 		t.Fatal(err)
 	}
-	for _, action := range []string{confirm, deleteCampaign, catalogAction(t, game, "Удалить игру из каталога")} {
-		panel := s.telegramMenu(action)
-		if catalogAction(t, panel, title) != "lb-open:"+ref || len(s.state.LotCatalog) != 1 || len(s.state.ManagedLots[ref].Rewards) != 1 {
-			t.Fatalf("saved lot must keep its campaigns visible in the catalog: %+v", panel)
-		}
-		for _, row := range panel.Buttons {
-			for _, button := range row {
-				if strings.Contains(button.Label, "Подтвердить удаление") {
-					t.Fatal("blocked removal still offered a confirmation action")
-				}
-			}
-		}
+	savedBundle := s.state.ManagedLots[ref]
+	if response := s.telegramMenu(confirm); !strings.Contains(response.Text, "Связанные лоты изменились") || len(s.state.LotCatalog) != 1 {
+		t.Fatalf("old confirmation did not notice a new linked lot: %+v", response)
+	}
+
+	editor := s.telegramMenu("lb-open:" + ref)
+	detail := s.telegramMenu(catalogAction(t, editor, "First campaign"))
+	draft := s.telegramMenu(catalogAction(t, detail, "Снять выбор кампании"))
+	if !strings.Contains(draft.Text, "0 из 2") || !reflect.DeepEqual(s.state.ManagedLots[ref], savedBundle) {
+		t.Fatalf("clearing a draft should leave the saved bundle in place: %+v", draft)
+	}
+
+	preview := s.telegramMenu(deleteGame)
+	if !strings.Contains(preview.Text, title) || !strings.Contains(preview.Text, "Сохранённый состав") {
+		t.Fatalf("confirmation doesn't explain what happens to linked lots: %+v", preview)
+	}
+	s.telegramMenu(catalogAction(t, preview, "Подтвердить удаление"))
+	state, err := loadState(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.LotCatalog) != 0 || !reflect.DeepEqual(state.LotArchivedCampaigns["one"], campaign) ||
+		!reflect.DeepEqual(state.ManagedLots[ref], savedBundle) {
+		t.Fatalf("catalog removal changed its linked lot or lost campaign metadata: %+v", state.ManagedLots[ref])
+	}
+	if root := s.telegramMenu("lot-catalog-page:0"); !strings.Contains(root.Text, "Каталог пока пуст") {
+		t.Fatalf("archived game still visible in catalog: %+v", root)
+	}
+
+	editor = s.telegramMenu("lb-open:" + ref)
+	campaignAction := catalogAction(t, editor, "из состава лота")
+	detail = s.telegramMenu(campaignAction)
+	if !strings.Contains(detail.Text, "1 из 2") {
+		t.Fatalf("editor did not restore saved partial selection: %+v", detail)
+	}
+	back := s.telegramMenu(catalogAction(t, detail, "К кампаниям"))
+	review := s.telegramMenu(catalogAction(t, back, "Проверить состав"))
+	result := s.telegramMenu(catalogAction(t, review, "Сохранить состав"))
+	if !strings.Contains(result.Text, "Состав сохранён") || !reflect.DeepEqual(s.state.ManagedLots[ref], savedBundle) {
+		t.Fatalf("editing the preserved bundle changed its saved rewards: %+v", result)
+	}
+
+	const otherRef = "abcdef0123456789abcdef01"
+	if err := s.saveManagedLotInput("lot-bundle", otherRef+"\none"); err == nil {
+		t.Fatal("a different lot was able to use an archived campaign")
 	}
 }
 

@@ -19,6 +19,7 @@ const lotCatalogPage = "lot-catalog-page:"
 type lotCatalogRemoval struct {
 	ref, token string
 	campaigns  map[string]lotCatalogCampaign
+	lots       []string
 	expires    time.Time
 }
 
@@ -156,19 +157,9 @@ func (s *scheduler) telegramLotCatalogRemoval(kind, value string, now time.Time)
 		bundleButton(&panel, "⬅️ Назад", lotCatalogPage+ref)
 		return panel
 	}
-	if lots := s.lotCatalogUsedBy(campaigns); len(lots) > 0 {
-		panel.Text = title + "\n\nОбновите состав этих лотов перед удалением из каталога."
-		for _, lotRef := range lots[:min(8, len(lots))] {
-			name := s.state.LotTitles[lotRef]
-			if name == "" {
-				name = lotRef
-			}
-			bundleButton(&panel, "🏷 "+brief(name, 56), "lb-open:"+lotRef)
-		}
-		if len(lots) > 8 {
-			panel.Text += fmt.Sprintf("\nВсего связанных лотов · %d", len(lots))
-			bundleButton(&panel, "📋 К списку лотов", "lb-list:0")
-		}
+	lots, used := s.lotCatalogUsedBy(campaigns)
+	if removal != nil && !slices.Equal(lots, removal.lots) {
+		panel.Text = "Связанные лоты изменились. Повторите удаление, чтобы увидеть актуальный список."
 		bundleButton(&panel, "⬅️ Назад", lotCatalogPage+ref)
 		return panel
 	}
@@ -182,10 +173,23 @@ func (s *scheduler) telegramLotCatalogRemoval(kind, value string, now time.Time)
 			return panel
 		}
 		token := hex.EncodeToString(key[:])
-		s.lotCatalogDelete = &lotCatalogRemoval{ref: ref, token: token, campaigns: campaigns, expires: now.Add(2 * time.Minute)}
+		s.lotCatalogDelete = &lotCatalogRemoval{ref: ref, token: token, campaigns: campaigns, lots: lots, expires: now.Add(2 * time.Minute)}
 		panel.Text = "Удалить кампанию из каталога?\n\n" + title
 		if isGame {
 			panel.Text = fmt.Sprintf("Удалить игру из каталога?\n\n%s\nКампаний к удалению · %d", title, len(campaigns))
+		}
+		if len(lots) > 0 {
+			panel.Text += "\n\nСохранённый состав следующих лотов продолжит действовать на FunPay."
+			for _, lotRef := range lots[:min(8, len(lots))] {
+				name := s.state.LotTitles[lotRef]
+				if name == "" {
+					name = lotRef
+				}
+				panel.Text += "\n• " + brief(name, 92)
+			}
+			if len(lots) > 8 {
+				panel.Text += fmt.Sprintf("\n… и ещё %d", len(lots)-8)
+			}
 		}
 		bundleButton(&panel, "⚠️ Подтвердить удаление", "lot-catalog-remove-confirm:"+token)
 		bundleButton(&panel, "↩️ Отмена", "lot-catalog-remove-cancel:"+token)
@@ -193,22 +197,38 @@ func (s *scheduler) telegramLotCatalogRemoval(kind, value string, now time.Time)
 	}
 
 	previous := s.state.LotCatalog
+	previousArchive := s.state.LotArchivedCampaigns
 	s.state.LotCatalog = maps.Clone(previous)
+	if len(used) > 0 {
+		s.state.LotArchivedCampaigns = maps.Clone(previousArchive)
+		if s.state.LotArchivedCampaigns == nil {
+			s.state.LotArchivedCampaigns = make(map[string]lotCatalogCampaign)
+		}
+		for id := range used {
+			s.state.LotArchivedCampaigns[id] = campaigns[id]
+		}
+	}
 	for id := range campaigns {
 		delete(s.state.LotCatalog, id)
 	}
 	if !s.persist() {
 		s.state.LotCatalog = previous
+		s.state.LotArchivedCampaigns = previousArchive
 		panel.Text = "Не удалось сохранить изменение каталога. Попробуйте ещё раз."
 		bundleButton(&panel, "⬅️ Назад", lotCatalogPage+ref)
 		return panel
 	}
 
 	back := "0"
-	for id, campaign := range campaigns {
-		if draft := s.lotBundleDraft; draft != nil {
-			delete(draft.Selected, id)
+	if draft := s.lotBundleDraft; draft != nil {
+		catalog := s.lotCatalogFor(draft.Ref)
+		for id := range campaigns {
+			if _, available := catalog[id]; !available {
+				delete(draft.Selected, id)
+			}
 		}
+	}
+	for _, campaign := range campaigns {
 		if !isGame {
 			gameRef := lotCatalogGameRef(campaign.Game)
 			if _, remaining := s.lotCatalogSelection(gameRef); len(remaining) > 0 {
@@ -225,16 +245,21 @@ func (s *scheduler) telegramLotCatalogRemoval(kind, value string, now time.Time)
 	return panel
 }
 
-func (s *scheduler) lotCatalogUsedBy(campaigns map[string]lotCatalogCampaign) []string {
+func (s *scheduler) lotCatalogUsedBy(campaigns map[string]lotCatalogCampaign) ([]string, map[string]bool) {
 	var refs []string
+	used := make(map[string]bool)
 	for ref, lot := range s.state.ManagedLots {
-		if slices.ContainsFunc(lot.Rewards, func(reward lotReward) bool {
-			_, selected := campaigns[reward.Campaign]
-			return selected
-		}) {
+		linked := false
+		for _, reward := range lot.Rewards {
+			if _, selected := campaigns[reward.Campaign]; selected {
+				used[reward.Campaign] = true
+				linked = true
+			}
+		}
+		if linked {
 			refs = append(refs, ref)
 		}
 	}
 	slices.Sort(refs)
-	return refs
+	return refs, used
 }

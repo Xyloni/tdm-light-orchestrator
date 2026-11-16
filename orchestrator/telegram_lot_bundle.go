@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,6 +15,27 @@ import (
 type lotBundleDraft struct {
 	Ref, Token, Game string
 	Selected         map[string]map[string]bool
+}
+
+// Call with the scheduler lock. Removed entries are only available to lots that already use them.
+func (s *scheduler) lotCatalogFor(ref string) map[string]lotCatalogCampaign {
+	catalog := s.state.LotCatalog
+	var extended map[string]lotCatalogCampaign
+	for _, reward := range s.state.ManagedLots[ref].Rewards {
+		campaign, archived := s.state.LotArchivedCampaigns[reward.Campaign]
+		if _, visible := catalog[reward.Campaign]; visible || !archived {
+			continue
+		}
+		if extended == nil {
+			extended = make(map[string]lotCatalogCampaign, len(catalog)+1)
+			maps.Copy(extended, catalog)
+		}
+		extended[reward.Campaign] = campaign
+	}
+	if extended != nil {
+		return extended
+	}
+	return catalog
 }
 
 func (s *scheduler) registerLotTitle(ref, title string, sample []lotSampleAccount) error {
@@ -136,8 +158,9 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 		return ""
 	}
 	view := args[1]
+	catalog := s.lotCatalogFor(draft.Ref)
 	if view == "game" {
-		for _, item := range s.state.LotCatalog {
+		for _, item := range catalog {
 			game := strings.ToLower(item.Game)
 			if gameRef(game) == arg(2) && draft.Game != game {
 				draft.Game, draft.Selected = game, make(map[string]map[string]bool)
@@ -154,7 +177,7 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 	}
 	if view == "games" {
 		games := make(map[string]string)
-		for _, item := range s.state.LotCatalog {
+		for _, item := range catalog {
 			games[strings.ToLower(item.Game)] = item.Game
 		}
 		keys := make([]string, 0, len(games))
@@ -183,20 +206,20 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 		return panel
 	}
 	var ids []string
-	for id, item := range s.state.LotCatalog {
+	for id, item := range catalog {
 		if strings.EqualFold(item.Game, draft.Game) {
 			ids = append(ids, id)
 		}
 	}
 	slices.SortFunc(ids, func(a, b string) int {
-		return strings.Compare(s.state.LotCatalog[a].Name+a, s.state.LotCatalog[b].Name+b)
+		return strings.Compare(catalog[a].Name+a, catalog[b].Name+b)
 	})
 	if view == "rewards" || view == "t" || view == "all" || view == "none" {
 		for _, id := range ids {
 			if gameRef(id) != arg(2) {
 				continue
 			}
-			item := s.state.LotCatalog[id]
+			item := catalog[id]
 			selected := draft.Selected[id]
 			switch view {
 			case "all":
@@ -228,6 +251,9 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 				draft.Selected[id] = selected
 			}
 			panel.Text += fmt.Sprintf("🎯 %s\nОтмечено наград: %d из %d", item.Name, len(selected), len(item.Rewards))
+			if _, inCatalog := s.state.LotCatalog[id]; !inCatalog {
+				panel.Text += "\nКампания открыта из сохранённого состава лота."
+			}
 			if item.InventoryOnly {
 				panel.Text += "\nПоказаны награды из инвентаря. Сверьте их с обещанным составом лота."
 			}
@@ -260,7 +286,7 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 			if len(picked) == 0 {
 				continue
 			}
-			item := s.state.LotCatalog[id]
+			item := catalog[id]
 			fields := []string{id}
 			var names []string
 			for i, r := range item.Rewards {
@@ -306,12 +332,16 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 	}
 	var items []bot.SettingsButton
 	for _, id := range ids {
-		item := s.state.LotCatalog[id]
+		item := catalog[id]
 		mark := "○ "
 		if len(draft.Selected[id]) > 0 {
 			mark = "✓ "
 		}
-		items = append(items, bot.SettingsButton{Label: fmt.Sprintf("%s%s · %d/%d", mark, brief(item.Name, 49), len(draft.Selected[id]), len(item.Rewards)), Action: link("rewards", gameRef(id), "0")})
+		label := fmt.Sprintf("%s%s · %d/%d", mark, brief(item.Name, 49), len(draft.Selected[id]), len(item.Rewards))
+		if _, inCatalog := s.state.LotCatalog[id]; !inCatalog {
+			label += " · из состава лота"
+		}
+		items = append(items, bot.SettingsButton{Label: label, Action: link("rewards", gameRef(id), "0")})
 	}
 	panel.Text += "Откройте кампании и отметьте нужные награды. Можно выбрать несколько кампаний."
 	if len(ids) == 0 {
@@ -320,6 +350,8 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 	bundlePageRows(&panel, arg(2), items, func(page int) string { return link("campaigns", strconv.Itoa(page)) })
 	if len(draft.Selected) > 0 {
 		bundleButton(&panel, "🔎 Проверить состав", link("review"))
+	} else if len(s.state.ManagedLots[draft.Ref].Rewards) > 0 {
+		panel.Text += "\n\nВ черновике нет отмеченных наград. Сохранённый состав действует до сохранения нового."
 	}
 	bundleButton(&panel, "🎮 Выбрать игру", link("games", "0"))
 	bundleButton(&panel, "Отмена", link("cancel"))

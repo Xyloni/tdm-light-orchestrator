@@ -69,6 +69,7 @@ type campaign struct {
 type state struct {
 	LotTitles             map[string]string              `json:",omitempty"`
 	LotCatalog            map[string]lotCatalogCampaign  `json:",omitempty"`
+	LotArchivedCampaigns  map[string]lotCatalogCampaign  `json:",omitempty"`
 	ManagedLots           map[string]managedLot          `json:",omitempty"`
 	LotAccounts           map[string]lotAccount          `json:",omitempty"`
 	LotCredentials        map[string]parser.Account      `json:",omitempty"`

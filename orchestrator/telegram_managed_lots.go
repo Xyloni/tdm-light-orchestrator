@@ -110,6 +110,7 @@ func (s *scheduler) saveLotBundleLocked(ref string, campaigns []string) error {
 		return fmt.Errorf("укажите код лота и от 1 до 20 кампаний")
 	}
 	lot := managedLot{Benefits: make(map[string][]string)}
+	catalog := s.lotCatalogFor(ref)
 	allDeadlines := true
 	seen := make(map[string]bool)
 	for _, line := range campaigns {
@@ -118,7 +119,7 @@ func (s *scheduler) saveLotBundleLocked(ref string, campaigns []string) error {
 			return fmt.Errorf("укажите каждую кампанию один раз")
 		}
 		id := fields[0]
-		item, ok := s.state.LotCatalog[id]
+		item, ok := catalog[id]
 		if !ok {
 			return fmt.Errorf("кампания %s отсутствует в каталоге лотов", id)
 		}
