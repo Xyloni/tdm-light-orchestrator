@@ -334,6 +334,9 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 					panel.Title = "⚙️ Настройки · " + g.Name
 					cfg := s.gameSettings(g)
 					panel.Text = fmt.Sprintf("Режим: %s\nРезерв кампании: %d мин\n\n%s", cfg.modeName(), cfg.ReserveMinutes, s.exclusionList(key))
+					if s.lotClaimProtected(g.Name, "") {
+						panel.Text += "\n\n🎁 Награды кампаний из сохранённых лотов остаются в Twitch для покупателя."
+					}
 					row(button("Правила игры", "prompt:policy:"+value))
 					if g.AutoClaimDrops {
 						row(button("🎁 Автополучение вкл. · выключить", "game-claim:"+value+":off"))

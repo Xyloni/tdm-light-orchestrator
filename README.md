@@ -105,6 +105,8 @@ sudo docker compose -f docker-compose.orchestrator.yml up -d --build
 
 ### 🔧 Обновление и откат
 
+Для подключения автовыдачи FunPay см. [настройку FunPay Cardinal и оркестратора](cardinal/INSTALL_RU.md).
+
 ```bash
 cd /opt/tdm-light-orchestrator
 sudo bash update.sh

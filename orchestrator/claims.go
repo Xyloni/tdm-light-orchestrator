@@ -17,6 +17,7 @@ import (
 type claimJob struct {
 	running                                                     bool
 	total, scanned, confirmed, already, failed, inventoryErrors int
+	reserved                                                    int
 }
 
 func (s *scheduler) claimJobRunning(key string) bool {
@@ -54,11 +55,19 @@ func (s *scheduler) startClaimJob(key string) string {
 	}
 	job := &claimJob{running: true, total: len(accounts)}
 	s.claimJobs[key] = job
-	go s.runClaimJob(key, g, s.configForGame(g), accounts, job)
+	protected := make(map[string]bool)
+	for _, lot := range s.state.ManagedLots {
+		if strings.EqualFold(lot.Game, g.Name) {
+			for _, reward := range lot.Rewards {
+				protected[reward.Campaign] = true
+			}
+		}
+	}
+	go s.runClaimJob(key, g, s.configForGame(g), accounts, protected, job)
 	return "Проверка инвентарей запущена. Обновите экран, чтобы увидеть результат."
 }
 
-func (s *scheduler) runClaimJob(key string, g *gameState, cfg config.Config, accounts []account, job *claimJob) {
+func (s *scheduler) runClaimJob(key string, g *gameState, cfg config.Config, accounts []account, protected map[string]bool, job *claimJob) {
 	ctx := s.claimCtx
 	httpClient := &http.Client{Timeout: 12 * time.Second}
 	defer httpClient.CloseIdleConnections()
@@ -87,7 +96,7 @@ func (s *scheduler) runClaimJob(key string, g *gameState, cfg config.Config, acc
 		client := twitch.NewGQLClient(httpClient, &cfg, &a.Credentials)
 		drops, err := client.DropsDashboard(ctx)
 		samples := make(map[string][]worker.ManagedRewardProgress)
-		var confirmed, already, failed int
+		var confirmed, already, failed, reserved int
 		for _, drop := range drops {
 			if ctx.Err() != nil {
 				return
@@ -101,6 +110,10 @@ func (s *scheduler) runClaimJob(key string, g *gameState, cfg config.Config, acc
 			case drop.IsClaimed:
 				already++
 			case drop.ProgressKnown && drop.Current >= drop.Required:
+				if protected[drop.CampaignID] {
+					reserved++
+					break
+				}
 				if _, err := client.ClaimAndVerifyDrop(ctx, drop); err != nil {
 					sample.ClaimError = err.Error()
 					failed++
@@ -122,6 +135,7 @@ func (s *scheduler) runClaimJob(key string, g *gameState, cfg config.Config, acc
 		job.confirmed += confirmed
 		job.already += already
 		job.failed += failed
+		job.reserved += reserved
 		if err != nil {
 			job.inventoryErrors++
 		}
@@ -139,12 +153,18 @@ func (s *scheduler) runClaimJob(key string, g *gameState, cfg config.Config, acc
 
 func (s *scheduler) claimSummary(key string) string {
 	var lines []string
+	if game := s.state.Games[key]; game != nil && s.lotClaimProtected(game.Name, "") {
+		lines = append(lines, "🎁 Награды кампаний из сохранённых лотов остаются в Twitch для покупателя.")
+	}
 	if job := s.claimJobs[key]; job != nil {
 		status := "Последняя проверка"
 		if job.running {
 			status = "Проверка выполняется"
 		}
 		lines = append(lines, fmt.Sprintf("%s: %d/%d аккаунтов\nПолучено сейчас: %d · уже получено: %d · не подтверждено: %d", status, job.scanned, job.total, job.confirmed, job.already, job.failed))
+		if job.reserved > 0 {
+			lines = append(lines, fmt.Sprintf("Сохранено для лотов: %d наград", job.reserved))
+		}
 		if job.inventoryErrors > 0 {
 			lines = append(lines, fmt.Sprintf("Не удалось прочитать инвентарь: %d аккаунтов", job.inventoryErrors))
 		}

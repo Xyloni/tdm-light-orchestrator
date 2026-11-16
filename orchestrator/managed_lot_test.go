@@ -8,6 +8,25 @@ import (
 	"github.com/xyloni/tdm-light-orchestrator/twitch"
 )
 
+func TestManagedLotCampaignsPreserveEarnedRewards(t *testing.T) {
+	s := testScheduler(t, time.Now())
+	s.state.ManagedLots = map[string]managedLot{
+		"lot": {Game: "Game", Rewards: []lotReward{{Campaign: "lot-campaign", ID: "reward"}}},
+	}
+	game := &gameState{Name: "GAME", AutoClaimDrops: true}
+	if cfg := s.configForCampaign(game, "lot-campaign"); cfg.AutoClaimDrops || cfg.CampaignID != "lot-campaign" {
+		t.Fatal("worker is allowed to auto-claim the lot reward")
+	}
+	if !s.configForCampaign(game, "other-campaign").AutoClaimDrops {
+		t.Fatal("lot changed auto-claim for a different campaign")
+	}
+	if state := classifyManagedLot(s.state.ManagedLots["lot"], twitch.LotInventory{Drops: []twitch.Drop{
+		{ID: "reward", CampaignID: "lot-campaign", IsClaimed: true},
+	}}); state == "ready" {
+		t.Fatal("Twitch claim alone was accepted as proof of buyer availability")
+	}
+}
+
 func TestManagedLotAccountOwnership(t *testing.T) {
 	s := testScheduler(t, time.Now())
 	const line = "player@example.invalid:player:test:fixture:123:device"

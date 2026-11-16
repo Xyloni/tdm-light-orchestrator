@@ -47,12 +47,15 @@ func (s *scheduler) setAutoClaim(key string, enabled bool) string {
 			g.AutoClaimDrops = !enabled
 			return s.notice
 		}
-		if a := s.active[key]; a != nil && !a.stopping {
+		if a := s.active[key]; a != nil && !a.stopping && !s.lotClaimProtected(g.Name, g.Current) {
 			a.stopping = true
 			a.process.stop()
 		}
 	}
 	if enabled {
+		if s.lotClaimProtected(g.Name, "") {
+			return "Автополучение включено для кампаний вне сохранённых лотов. Награды кампаний из лотов остаются в Twitch для покупателя."
+		}
 		return "Автополучение включено. Получение проверяется в инвентаре Twitch."
 	}
 	return "Автополучение выключено."

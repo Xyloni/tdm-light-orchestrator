@@ -24,6 +24,8 @@ jobs:
       - if: runner.os == 'Linux'
         run: go test -race ./...
       - if: runner.os == 'Linux'
+        run: python3 -B -m unittest discover -s cardinal -p 'test_*.py'
+      - if: runner.os == 'Linux'
         run: |
           bash -n deploy/install-vps.sh vps/install.sh vps/update.sh
           docker compose -f vps/compose.yaml config --quiet

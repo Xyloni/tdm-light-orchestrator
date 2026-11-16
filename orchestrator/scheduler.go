@@ -385,8 +385,7 @@ func (s *scheduler) launchGroup(key string, g *gameState, c *campaign, a *active
 	if !s.persist() {
 		return
 	}
-	cfg := s.configForGame(g)
-	cfg.TargetGame, cfg.CampaignID = g.Name, c.ID
+	cfg := s.configForCampaign(g, c.ID)
 	cfg.LogDir = a.logDir
 	options := s.minerOptions()
 	cfg.Diagnostics, cfg.SingleLog, cfg.UsePubSub = options.Diagnostics, options.SingleLog, options.UsePubSub

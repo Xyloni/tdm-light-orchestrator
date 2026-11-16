@@ -221,12 +221,19 @@ func (s *scheduler) saveLotBundleLocked(ref string, campaigns []string) error {
 		lot.SuggestedCutoff = nil
 		lot.DeadlineSources = nil
 	}
+	for key, game := range s.state.Games {
+		if strings.EqualFold(game.Name, lot.Game) && s.claimJobRunning(key) {
+			return fmt.Errorf("дождитесь завершения получения Drops для этой игры")
+		}
+	}
+	previousPolicies := s.activeLotClaimPolicies()
 	if s.state.ManagedLots == nil {
 		s.state.ManagedLots = make(map[string]managedLot)
 	}
 	prior, exists := s.state.ManagedLots[ref]
 	s.state.ManagedLots[ref] = lot
 	if s.persist() {
+		s.refreshLotClaimPolicies(previousPolicies)
 		return nil
 	}
 	if exists {
