@@ -19,7 +19,7 @@ from threading import BoundedSemaphore, Lock, RLock, Thread
 from urllib import error, parse, request
 
 NAME = "TDM Drops lots"
-VERSION = "0.4.4"
+VERSION = "0.4.5"
 DESCRIPTION = "Checks Twitch Drops, guards Cardinal delivery and retires configured lots."
 CREDITS = "TDM Light Orchestrator"
 UUID = "b66cfbb9-9fe6-40e1-b9da-cf1d0e326542"
@@ -34,6 +34,7 @@ MANAGED_URL = "http://127.0.0.1:8787/internal/managed-lot"
 DEADLINE = re.compile(r"\[\s*до\s+(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?\s*\]", re.IGNORECASE)
 MSK = dt.timezone(dt.timedelta(hours=3))
 SCAN_INTERVAL = 900
+NATIVE_FLAGS = ("disable", "disableAutoRestore", "disableAutoDisable")
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -426,7 +427,8 @@ class LotAutomation:
         self.notice_flush_lock = Lock()
         self.confirmed_notices = set()
         self.background_requests = BoundedSemaphore(4)
-        self.workers = set()
+        self.workers = {}
+        self.lot_operations = {}
         self.status = {}
         self.preferred = {}
         self.offer_checked = {}
@@ -484,6 +486,8 @@ class LotAutomation:
             with locked:
                 product_rows(path, product_format)
             deadline = title_deadline(fields.title_ru, dt.datetime.now(MSK))
+            section_settings = self.cardinal.AD_CFG[section]
+            lot["native_settings"] = {key: section_settings.get(key) for key in NATIVE_FLAGS}
             self.protect_native_stock(lot)
             self.update(ref, **lot, deadline=deadline, retired=None, inactive_since=None,
                         orders={}, pending={}, sold=[], delivery_since=dt.datetime.now(dt.timezone.utc).isoformat())
@@ -496,16 +500,69 @@ class LotAutomation:
         section = config[lot["section"]]
         if section.get("productsFileName") != lot["file"]:
             raise ValueError("Изменился TXT управляемого лота.")
-        if lot["section"] not in self.native_dirty and all(
-                section.get(key) == "1" for key in ("disable", "disableAutoRestore", "disableAutoDisable")):
+        if lot["section"] not in self.native_dirty and all(section.get(key) == "1" for key in NATIVE_FLAGS):
             return
-        for key in ("disable", "disableAutoRestore", "disableAutoDisable"):
+        for key in NATIVE_FLAGS:
             section[key] = "1"
+        self.save_native_config(lot["section"])
+
+    def save_native_config(self, section):
         buffer = io.StringIO()
-        config.write(buffer)
-        self.native_dirty.add(lot["section"])
+        self.cardinal.AD_CFG.write(buffer)
+        self.native_dirty.add(section)
         atomic_text(self.native_config, buffer.getvalue())
-        self.native_dirty.discard(lot["section"])
+        self.native_dirty.discard(section)
+
+    def lot_operation(self, ref):
+        with self.lock:
+            return self.lot_operations.setdefault(ref, RLock())
+
+    def detach(self, ref, *, expected_generation=None):
+        with self.lot_operation(ref), self.funpay_lock, self.lock:
+            lot = self.data.get(ref)
+            if expected_generation is not None and (lot is None or (lot["id"], lot.get("delivery_since")) != expected_generation):
+                raise ValueError("Подключение лота изменилось. Откройте карточку и подтвердите отвязку заново.")
+            if lot is None:
+                return
+            if (lot["pending"] or lot.get("retirement_detachment") or lot.get("retirement_review")
+                    or any(order["logins"] for order in lot["orders"].values())):
+                raise ValueError("Сначала дождитесь сверки резервов и завершения возврата товара.")
+            path, locked = self.product_file(lot)
+            offer = self.offer(lot)
+            if offer.active:
+                raise ValueError("Сначала скройте лот на FunPay, чтобы во время передачи не поступали новые заказы.")
+            reason = self.open_orders(lot, offer)
+            if reason:
+                raise ValueError(reason)
+            with locked:
+                rows = product_rows(path, lot["format"])
+                sold = set(lot["sold"])
+                if any(sold_key(login) in sold for login in rows):
+                    raise ValueError("В TXT есть выданный товар. Сверьте остаток перед передачей.")
+                section_name = lot["section"]
+                section = self.cardinal.AD_CFG[section_name]
+                if "$product" not in section.get("response", ""):
+                    raise ValueError("Добавьте $product в шаблон штатной автовыдачи.")
+                if not lot.get("handoff"):
+                    # Persist the handoff before restoring native flags so a restart can finish it.
+                    self.update(ref, handoff=True)
+                settings = lot.get("native_settings", {"disable": "0"})
+                for key in NATIVE_FLAGS:
+                    if key in settings:
+                        if settings[key] is None:
+                            self.cardinal.AD_CFG.remove_option(section_name, key)
+                        else:
+                            section[key] = settings[key]
+                self.save_native_config(section_name)
+                data = dict(self.data)
+                del data[ref]
+                atomic_text(self.path, json.dumps(data, ensure_ascii=False))
+                self.data = data
+                self.workers.pop(ref, None)
+                self.status.pop(ref, None)
+                self.preferred.pop(ref, None)
+                self.offer_checked.pop(ref, None)
+                self.orders_checked.pop(ref, None)
 
     def update_with_notice(self, ref, key, message, **changes):
         with self.lock:
@@ -678,10 +735,11 @@ class LotAutomation:
 
     def start_worker(self, ref):
         with self.lock:
-            if ref in self.workers:
+            if ref not in self.data or ref in self.workers:
                 return
-            self.workers.add(ref)
-        Thread(target=self.monitor, args=(ref,), daemon=True, name=f"TDM lot {ref}").start()
+            generation = object()
+            self.workers[ref] = generation
+        Thread(target=self.monitor, args=(ref, generation), daemon=True, name=f"TDM lot {ref}").start()
 
     def record_inventory_health(self, ref, success, now=None):
         now = now or dt.datetime.now(MSK)
@@ -710,7 +768,7 @@ class LotAutomation:
                                         "уже 15 минут. Проверьте доступ к Twitch и FunPay, TXT и настройки лота.",
                                         inventory_outage_since=failed_since)
 
-    def monitor(self, ref):
+    def monitor(self, ref, generation):
         cache = {}
         bundle = None
         bundle_checked = 0
@@ -722,81 +780,93 @@ class LotAutomation:
             if not self.cardinal.plugins[UUID].enabled:
                 time.sleep(5)
                 continue
-            lot = self.data[ref]
-            try:
-                self.flush_notices(ref)
-                self.finish_sales(ref, lot)
-                lot = self.refresh_offer(ref)
-                self.recover_orders(ref, lot)
-                if lot["retired"]:
-                    if time.monotonic() >= next_release:
-                        next_release = time.monotonic() + 60
-                        self.retire_stock(ref, lot)
-                else:
-                    if time.monotonic() >= bundle_checked:
-                        current_bundle = managed_request(ref)
-                        if current_bundle != bundle:
-                            bundle = current_bundle
-                            cache.clear()
-                            checked_in_sweep.clear()
-                            next_sweep = 0
-                        bundle_checked = time.monotonic() + 60
-                    path, locked = self.product_file(lot)
-                    with locked:
-                        rows = product_rows(path, lot["format"])
-                    blocked = self.blocked_logins(lot)
-                    rows = {login: line for login, line in rows.items()
-                            if login not in blocked and sold_key(login) not in lot["sold"]}
-                    stamp = time.monotonic()
-                    cache = {login: item for login, item in cache.items()
-                             if login in rows and item[0] == sold_key(rows[login])}
-                    checked_in_sweep.intersection_update(cache)
-                    if stamp >= next_sweep:
-                        for login, line in rows.items():
-                            if login not in checked_in_sweep:
-                                cache[login] = (sold_key(line), self.check(ref, lot, login, line))
-                                checked_in_sweep.add(login)
-                                break
-                    states = [item[1] for item in cache.values()]
-                    self.preferred[ref] = {login for login, item in cache.items() if item[1] == "ready"}
-                    ready = states.count("ready")
-                    missing = states.count("missing")
-                    self.status[ref] = (len(rows), ready, missing, len(states) - ready - missing)
-                    completed = stamp >= next_sweep and len(checked_in_sweep) == len(rows)
-                    if completed and rows:
-                        checked = {"ready", "missing", "claimed_unverified", "claim_unverified"}
-                        self.record_inventory_health(ref, all(state in checked for state in states))
-                    if not rows or (completed and missing == len(rows)):
-                        if rows and bundle != managed_request(ref):
-                            bundle_checked = 0
-                            continue
-                        with self.funpay_lock, self.lock, locked:
-                            current = self.data[ref]
-                            actual = product_rows(path, lot["format"])
-                            actual = {login: line for login, line in actual.items() if login not in self.blocked_logins(current)
-                                      and sold_key(login) not in current["sold"]}
-                            if actual == rows and not current["retired"]:
-                                self.update(ref, retired="подтверждено отсутствие нужных наград" if rows else "остаток закончился")
-                    if completed:
-                        checked_in_sweep.clear()
-                        next_sweep = stamp + SCAN_INTERVAL
-                        if not self.data[ref]["retired"]:
-                            self.sync_verified_stock(ref, rows, cache, bundle)
-                last_error = None
-            except Exception as exc:
-                reason = type(exc).__name__
-                if last_error != reason:
-                    LOG.warning("TDM: listing %s monitoring failed (%s)", lot["id"], reason)
-                    if lot["retired"]:
-                        self.notify(lot, f"⚠️ Лот #{lot['id']} · проверка приостановлена. Проверьте настройки лота, TXT и связь с сервисами.")
-                    last_error = reason
-                if not lot["retired"]:
+            delay = 1
+            with self.lot_operation(ref):
+                if self.workers.get(ref) is not generation:
+                    return
+                lot = self.data[ref]
+                if lot.get("handoff"):
                     try:
-                        self.record_inventory_health(ref, False)
-                    except OSError:
-                        LOG.warning("TDM: could not persist inventory health for listing %s", lot["id"])
-                time.sleep(30)
-            time.sleep(1)
+                        self.detach(ref)
+                    except (OSError, ValueError, KeyError):
+                        delay = 30
+                    else:
+                        return
+                else:
+                    try:
+                        self.flush_notices(ref)
+                        self.finish_sales(ref, lot)
+                        lot = self.refresh_offer(ref)
+                        self.recover_orders(ref, lot)
+                        if lot["retired"]:
+                            if time.monotonic() >= next_release:
+                                next_release = time.monotonic() + 60
+                                self.retire_stock(ref, lot)
+                        else:
+                            if time.monotonic() >= bundle_checked:
+                                current_bundle = managed_request(ref)
+                                if current_bundle != bundle:
+                                    bundle = current_bundle
+                                    cache.clear()
+                                    checked_in_sweep.clear()
+                                    next_sweep = 0
+                                bundle_checked = time.monotonic() + 60
+                            path, locked = self.product_file(lot)
+                            with locked:
+                                rows = product_rows(path, lot["format"])
+                            blocked = self.blocked_logins(lot)
+                            rows = {login: line for login, line in rows.items()
+                                    if login not in blocked and sold_key(login) not in lot["sold"]}
+                            stamp = time.monotonic()
+                            cache = {login: item for login, item in cache.items()
+                                     if login in rows and item[0] == sold_key(rows[login])}
+                            checked_in_sweep.intersection_update(cache)
+                            if stamp >= next_sweep:
+                                for login, line in rows.items():
+                                    if login not in checked_in_sweep:
+                                        cache[login] = (sold_key(line), self.check(ref, lot, login, line))
+                                        checked_in_sweep.add(login)
+                                        break
+                            states = [item[1] for item in cache.values()]
+                            self.preferred[ref] = {login for login, item in cache.items() if item[1] == "ready"}
+                            ready = states.count("ready")
+                            missing = states.count("missing")
+                            self.status[ref] = (len(rows), ready, missing, len(states) - ready - missing)
+                            completed = stamp >= next_sweep and len(checked_in_sweep) == len(rows)
+                            if completed and rows:
+                                checked = {"ready", "missing", "claimed_unverified", "claim_unverified"}
+                                self.record_inventory_health(ref, all(state in checked for state in states))
+                            if not rows or (completed and missing == len(rows)):
+                                if rows and bundle != managed_request(ref):
+                                    bundle_checked = 0
+                                    continue
+                                with self.funpay_lock, self.lock, locked:
+                                    current = self.data[ref]
+                                    actual = product_rows(path, lot["format"])
+                                    actual = {login: line for login, line in actual.items() if login not in self.blocked_logins(current)
+                                              and sold_key(login) not in current["sold"]}
+                                    if actual == rows and not current["retired"]:
+                                        self.update(ref, retired="подтверждено отсутствие нужных наград" if rows else "остаток закончился")
+                            if completed:
+                                checked_in_sweep.clear()
+                                next_sweep = stamp + SCAN_INTERVAL
+                                if not self.data[ref]["retired"]:
+                                    self.sync_verified_stock(ref, rows, cache, bundle)
+                        last_error = None
+                    except Exception as exc:
+                        reason = type(exc).__name__
+                        if last_error != reason:
+                            LOG.warning("TDM: listing %s monitoring failed (%s)", lot["id"], reason)
+                            if lot["retired"]:
+                                self.notify(lot, f"⚠️ Лот #{lot['id']} · проверка приостановлена. Проверьте настройки лота, TXT и связь с сервисами.")
+                            last_error = reason
+                        if not lot["retired"]:
+                            try:
+                                self.record_inventory_health(ref, False)
+                            except OSError:
+                                LOG.warning("TDM: could not persist inventory health for listing %s", lot["id"])
+                        delay = 31
+            time.sleep(delay)
 
     def refresh_offer(self, ref):
         now = dt.datetime.now(MSK)
@@ -1387,7 +1457,8 @@ class LotAutomation:
         with self.funpay_lock, self.lock:
             for ref, lot in tuple(self.data.items()):
                 try:
-                    self.protect_native_stock(lot)
+                    if not lot.get("handoff"):
+                        self.protect_native_stock(lot)
                     if not lot.get("delivery_since"):
                         self.update(ref, delivery_since=dt.datetime.now(dt.timezone.utc).isoformat())
                 except (OSError, ValueError, KeyError) as exc:
@@ -1415,21 +1486,33 @@ class LotAutomation:
             if not matches:
                 return original(cardinal, event)
             ref, lot = matches[0]
-            try:
-                if len(matches) > 1:
-                    raise ValueError("Заказ совпал с несколькими управляемыми лотами.")
-                if not self.cardinal.plugins[UUID].enabled:
-                    raise ValueError("Автоматизация лотов отключена. Заказ требует внимания продавца.")
-                with self.funpay_lock, self.lock:
-                    self.protect_native_stock(lot)
-                self.guarded_delivery(event, ref, lot)
-            except Exception as exc:
-                event.error = 1
-                event.error_text = "Автовыдача приостановлена. Проверьте заказ в Cardinal."
-                self.remember_order_attention(ref, event.order.id, exc)
-                message = str(exc) if isinstance(exc, ValueError) else "Проверка или выдача не подтверждена. Проверьте заказ в Cardinal."
-                self.notify(lot, f"⚠️ Заказ #{event.order.id}\n{message}")
-                LOG.warning("TDM: order %s held (%s)", event.order.id, type(exc).__name__)
+            with self.lot_operation(ref):
+                current = self.data.get(ref)
+                if current is None:
+                    # An event waiting for the handoff may predate the last paid-order check.
+                    if event.order.id in lot["orders"]:
+                        return
+                    if event.order.id == "ADTEST" or order_state(self.cardinal.account.get_order(event.order.id)) == "PAID":
+                        return original(cardinal, event)
+                    return
+                lot = current
+                try:
+                    if len(matches) > 1:
+                        raise ValueError("Заказ совпал с несколькими управляемыми лотами.")
+                    if lot.get("handoff"):
+                        raise ValueError("Лот передаётся штатной автовыдаче. Проверьте заказ в Cardinal.")
+                    if not self.cardinal.plugins[UUID].enabled:
+                        raise ValueError("Автоматизация лотов отключена. Заказ требует внимания продавца.")
+                    with self.funpay_lock, self.lock:
+                        self.protect_native_stock(lot)
+                    self.guarded_delivery(event, ref, lot)
+                except Exception as exc:
+                    event.error = 1
+                    event.error_text = "Автовыдача приостановлена. Проверьте заказ в Cardinal."
+                    self.remember_order_attention(ref, event.order.id, exc)
+                    message = str(exc) if isinstance(exc, ValueError) else "Проверка или выдача не подтверждена. Проверьте заказ в Cardinal."
+                    self.notify(lot, f"⚠️ Заказ #{event.order.id}\n{message}")
+                    LOG.warning("TDM: order %s held (%s)", event.order.id, type(exc).__name__)
 
         delivery_guard.plugin_uuid = None
         self.cardinal.new_order_handlers[positions[0]] = delivery_guard
@@ -1455,6 +1538,7 @@ class LotAutomation:
 
 def init_telegram(crd, *_):
     tg = crd.telegram
+    from secrets import token_urlsafe
     from Utils import cardinal_tools
     automation = LotAutomation(crd, cardinal_tools)
     crd.tdm_lot_automation = automation
@@ -1465,6 +1549,8 @@ def init_telegram(crd, *_):
     bot = tg.bot
     running = Lock()
     diagnosing = Lock()
+    detach_lock = Lock()
+    detach_confirmations = {}
     products_dir = Path("storage/products").resolve()
 
     def authorized(message, sender):
@@ -1614,6 +1700,59 @@ def init_telegram(crd, *_):
             return
         enable_lot(message.chat.id, fields[1], item, int(fields[2]), fields[3])
 
+    def preview_detach(chat, ref):
+        with automation.lock:
+            lot = automation.data.get(ref)
+            if lot is not None:
+                generation = (lot["id"], lot.get("delivery_since"))
+        if lot is None:
+            reply(chat, "Лот уже отвязан. Откройте /tdm_lots заново.")
+            return
+        token = token_urlsafe(12)
+        with detach_lock:
+            detach_confirmations[chat] = (token, time.monotonic() + 180, ref, generation)
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("🔌 Подтвердить отвязку", callback_data=f"tdm-lots:detach-ok:{token}"))
+        keyboard.add(InlineKeyboardButton("⬅️ Отмена", callback_data=f"tdm-lots:detach-cancel:{token}"))
+        reply(chat, f"🔌 Отвязка лота #{lot['id']}\n\n"
+                    "Временно скройте лот на FunPay и завершите открытые заказы. "
+                    "При подтверждении плагин сверит заказы и резервы, затем включит штатную выдачу Cardinal "
+                    "по текущему остатку TXT.", keyboard)
+
+    def accept_detach(chat, token, cancel):
+        with detach_lock:
+            pending = detach_confirmations.get(chat)
+            if pending is not None and pending[0] == token:
+                del detach_confirmations[chat]
+            else:
+                pending = None
+        if pending is None or time.monotonic() >= pending[1]:
+            reply(chat, "Подтверждение устарело. Откройте карточку лота в /tdm_lots и повторите отвязку.")
+            return
+        _, _, ref, generation = pending
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("⬅️ К лоту", callback_data=f"tdm-lots:lot:{ref}"))
+        if cancel:
+            reply(chat, "Отвязка отменена.", keyboard)
+            return
+
+        def run():
+            try:
+                automation.detach(ref, expected_generation=generation)
+            except ValueError as exc:
+                reply(chat, f"⚠️ {exc}", keyboard)
+            except Exception as exc:
+                LOG.warning("TDM: listing %s could not be detached (%s)", generation[0], type(exc).__name__)
+                reply(chat, "⚠️ Cardinal не завершил отвязку. Проверьте связь с FunPay и повторите действие.", keyboard)
+            else:
+                text = f"✅ Лот #{generation[0]} отвязан. Для остатка TXT восстановлена штатная выдача Cardinal."
+                if not crd.autodelivery_enabled:
+                    text += "\nВключите глобальную автовыдачу Cardinal, чтобы обрабатывать новые заказы."
+                reply(chat, text, keyboard)
+
+        reply(chat, "⏳ Проверяю заказы и резервы.")
+        Thread(target=run, daemon=True).start()
+
     def handle(call):
         if not authorized(call.message, call.from_user):
             bot.answer_callback_query(call.id)
@@ -1626,6 +1765,12 @@ def init_telegram(crd, *_):
             return
         if action == "diagnose" and value == "link":
             show_diagnostics(chat)
+            return
+        if action == "detach" and re.fullmatch(r"[a-f0-9]{24}", value):
+            preview_detach(chat, value)
+            return
+        if action in ("detach-ok", "detach-cancel"):
+            accept_detach(chat, value, cancel=action == "detach-cancel")
             return
         ref, _, product_format = value.partition("/")
         if action == "attention" and (ref == "all" or ref in automation.data) and product_format.isdecimal():
@@ -1684,6 +1829,7 @@ def init_telegram(crd, *_):
                     keyboard.add(InlineKeyboardButton(f"⚠️ Заказы требуют внимания · {unresolved}",
                                                       callback_data=f"tdm-lots:attention:{ref}/0"))
                 keyboard.add(InlineKeyboardButton("🔄 Обновить", callback_data=f"tdm-lots:lot:{ref}"))
+                keyboard.add(InlineKeyboardButton("🔌 Отвязать от оркестратора", callback_data=f"tdm-lots:detach:{ref}"))
             keyboard.add(InlineKeyboardButton("📋 Настроить состав", callback_data=f"tdm-lots:edit:{ref}"))
             keyboard.add(InlineKeyboardButton("📅 Сроки и состав", callback_data=f"tdm-lots:bundle:{ref}"))
             keyboard.add(InlineKeyboardButton("🔌 Диагностика связи", callback_data=f"tdm-lots:diagnose:{ref}"))
