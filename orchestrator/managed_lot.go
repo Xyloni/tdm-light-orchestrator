@@ -289,6 +289,10 @@ func (s *scheduler) serveManagedLot(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	if req.Operation == "diagnose" {
+		s.serveManagedLotDiagnosis(w, r, req)
+		return
+	}
 	if req.Operation == "register" {
 		digest := sha256.Sum256([]byte(req.Title))
 		if req.Lot != fmt.Sprintf("%x", digest[:12]) || strings.TrimSpace(req.Title) == "" || req.AccountLine != "" || req.Login != "" || !validLotSample(req.Sample) {
@@ -352,6 +356,31 @@ func (s *scheduler) serveManagedLot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(s.finishManagedLotAccount(req, credentials))
+}
+
+func (s *scheduler) serveManagedLotDiagnosis(w http.ResponseWriter, r *http.Request, req managedLotRequest) {
+	if req.Title != "" || req.Login != "" || req.AccountLine != "" || len(req.Sample) > 1 || !validLotSample(req.Sample) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	status := "orchestrator_ok"
+	if req.Sample != nil {
+		s.mu.Lock()
+		accounts := s.credentialsForLotSample(req.Lot, req.Sample)
+		cfg := s.miner
+		s.mu.Unlock()
+		status = "twitch_no_account"
+		if len(accounts) > 0 {
+			cfg.Diagnostics = false
+			client := &http.Client{Timeout: 7 * time.Second}
+			defer client.CloseIdleConnections()
+			status = "twitch_unavailable"
+			if _, err := twitch.NewGQLClient(client, &cfg, &accounts[0]).ReadLotInventory(r.Context()); err == nil {
+				status = "twitch_ok"
+			}
+		}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]string{"state": status})
 }
 
 func (s *scheduler) refreshLotCredentials(req managedLotRequest, credentials parser.Account) bool {

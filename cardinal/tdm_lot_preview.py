@@ -9,6 +9,7 @@ import http.client
 import io
 import socket
 import os
+import stat
 import tempfile
 import time
 from pathlib import Path
@@ -18,7 +19,7 @@ from threading import BoundedSemaphore, Lock, RLock, Thread
 from urllib import error, parse, request
 
 NAME = "TDM Drops lots"
-VERSION = "0.4.3"
+VERSION = "0.4.4"
 DESCRIPTION = "Checks Twitch Drops, guards Cardinal delivery and retires configured lots."
 CREDITS = "TDM Light Orchestrator"
 UUID = "b66cfbb9-9fe6-40e1-b9da-cf1d0e326542"
@@ -195,6 +196,83 @@ def managed_request(ref, operation=None, login=None, account_line=None, title=No
         req = request.Request(MANAGED_URL, data=json.dumps(data).encode(), headers=headers)
     with open_orchestrator(req) as response:
         return json.load(response)
+
+
+def diagnostic_request(token, use_socket, ref, sample=None):
+    connection_type = UnixHTTPConnection if use_socket else http.client.HTTPConnection
+    connection = connection_type("127.0.0.1", 8787, timeout=13)
+    payload = {"Operation": "diagnose", "Lot": ref}
+    if sample:
+        payload["Sample"] = sample
+    try:
+        connection.request("POST", "/internal/managed-lot", json.dumps(payload), {
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+        })
+        response = connection.getresponse()
+        if response.status != 200:
+            return response.status, None
+        result = json.loads(response.read(4096))
+        state = result.get("state") if isinstance(result, dict) else None
+        return response.status, state if isinstance(state, str) else None
+    finally:
+        connection.close()
+
+
+def orchestrator_diagnostics(ref=None, sample=None, sample_unreadable=False):
+    socket_path = os.environ.get("ORCHESTRATOR_CARDINAL_SOCKET")
+    if socket_path:
+        try:
+            mode = Path(socket_path).stat().st_mode
+        except FileNotFoundError:
+            return "❌ Сокет · не найден в контейнере Cardinal. Проверьте монтирование каталога."
+        except OSError:
+            return "❌ Сокет · Cardinal не может проверить путь. Проверьте доступ к каталогу."
+        if not stat.S_ISSOCK(mode):
+            return "❌ Сокет · по заданному пути находится другой тип файла. Проверьте путь."
+        lines = ["✅ Сокет · файл виден Cardinal"]
+    else:
+        lines = ["ℹ️ Сокет не задан · проверяется локальный HTTP"]
+
+    token = os.environ.get("ORCHESTRATOR_LOT_PREVIEW_TOKEN", "")
+    if len(token) < 32:
+        lines.append("❌ Токен · отсутствует или короче 32 символов. Проверьте файл окружения Cardinal.")
+        return "\n".join(lines)
+
+    try:
+        status, state = diagnostic_request(token, bool(socket_path), "0" * 24)
+    except PermissionError:
+        lines.append("❌ Подключение · нет доступа к сокету. Проверьте права и группу Cardinal.")
+    except (OSError, http.client.HTTPException, ValueError):
+        lines.append("❌ Подключение · оркестратор не вернул читаемый ответ. Проверьте запуск контейнера.")
+    else:
+        if status in (401, 403, 404):
+            lines.append("❌ Доступ · запрос отклонён. Проверьте совпадение общего токена и путь к оркестратору.")
+        elif status == 400:
+            lines.append("ℹ️ Токен принят. Обновите оркестратор до версии с диагностикой.")
+        elif status != 200:
+            lines.append(f"❌ Оркестратор · вернул HTTP {status}.")
+        elif state != "orchestrator_ok":
+            lines.append("❌ Оркестратор · ответ диагностики не распознан. Проверьте версии.")
+        else:
+            lines.extend(("✅ Токен · принят", "✅ Оркестратор · отвечает"))
+            if ref is None:
+                lines.append("ℹ️ Для проверки Twitch откройте диагностику в карточке лота.")
+            elif sample_unreadable:
+                lines.append("⚠️ Twitch · товарный TXT не удалось прочитать.")
+            elif not sample:
+                lines.append("ℹ️ Twitch · в TXT нет доступного аккаунта для проверки.")
+            else:
+                try:
+                    _, state = diagnostic_request(token, bool(socket_path), ref, sample)
+                except (OSError, http.client.HTTPException, ValueError):
+                    state = None
+                lines.append({
+                    "twitch_ok": "✅ Twitch · инвентарь тестового аккаунта доступен",
+                    "twitch_unavailable": "⚠️ Twitch · оркестратор не получил инвентарь тестового аккаунта. Проверьте авторизацию аккаунта или повторите позже.",
+                    "twitch_no_account": "⚠️ Twitch · нет подходящих данных для проверки выбранного аккаунта.",
+                }.get(state, "⚠️ Twitch · проверка не завершилась. Повторите позже."))
+    return "\n".join(lines)
 
 
 def title_deadline(title, now, previous=None):
@@ -1386,6 +1464,7 @@ def init_telegram(crd, *_):
 
     bot = tg.bot
     running = Lock()
+    diagnosing = Lock()
     products_dir = Path("storage/products").resolve()
 
     def authorized(message, sender):
@@ -1424,8 +1503,43 @@ def init_telegram(crd, *_):
             keyboard.add(InlineKeyboardButton("Дальше", callback_data=f"tdm-lots:page:{page+1}"))
         if automation.data:
             keyboard.add(InlineKeyboardButton("⚠️ Заказы требуют внимания", callback_data="tdm-lots:attention:all/0"))
+        keyboard.add(InlineKeyboardButton("🔌 Диагностика связи", callback_data="tdm-lots:diagnose:link"))
         text = "🏷 Лоты Twitch Drops\n\nВыберите запись автовыдачи Cardinal." if entries else "Нет записей автовыдачи с доступным TXT."
         reply(chat, text, keyboard)
+
+    def show_diagnostics(chat, ref=None, path=None, product_lock=None):
+        if not diagnosing.acquire(blocking=False):
+            reply(chat, "⏳ Диагностика уже выполняется.")
+            return
+
+        def run():
+            try:
+                sample = None
+                sample_unreadable = False
+                if path is not None:
+                    try:
+                        with automation.lock, product_lock:
+                            lot = automation.data.get(ref)
+                            blocked = automation.blocked_logins(lot) if lot else set()
+                            sold = set(lot["sold"]) if lot else set()
+                            sample = lot_stock_sample(path, blocked, sold, limit=1)
+                    except (OSError, ValueError):
+                        sample_unreadable = True
+                result = orchestrator_diagnostics(ref, sample, sample_unreadable)
+                keyboard = InlineKeyboardMarkup()
+                keyboard.add(InlineKeyboardButton("🔄 Повторить проверку", callback_data=f"tdm-lots:diagnose:{ref or 'link'}"))
+                label, action = ("⬅️ К лоту", f"tdm-lots:lot:{ref}") if ref else ("🏷 К лотам", "tdm-lots:page:0")
+                keyboard.add(InlineKeyboardButton(label, callback_data=action))
+                reply(chat, f"🔌 Диагностика связи\n\nПлагин Cardinal · {VERSION}\n\n{result}", keyboard)
+            finally:
+                diagnosing.release()
+
+        try:
+            reply(chat, "⏳ Проверяю связь. Результат появится в этом чате.")
+            Thread(target=run, daemon=True).start()
+        except Exception:
+            diagnosing.release()
+            raise
 
     def show_attention(chat, selection, page):
         ref = None if selection == "all" else selection
@@ -1510,6 +1624,9 @@ def init_telegram(crd, *_):
         if action == "page" and value.isdecimal():
             show_lots(chat, int(value))
             return
+        if action == "diagnose" and value == "link":
+            show_diagnostics(chat)
+            return
         ref, _, product_format = value.partition("/")
         if action == "attention" and (ref == "all" or ref in automation.data) and product_format.isdecimal():
             show_attention(chat, ref, int(product_format))
@@ -1523,6 +1640,9 @@ def init_telegram(crd, *_):
             return
         title, path = item
         product_lock = cardinal_tools.get_products_file_lock(f"storage/products/{path.name}")
+        if action == "diagnose" and value == ref:
+            show_diagnostics(chat, ref, path, product_lock)
+            return
         if action == "lot":
             count = cardinal_tools.count_products(f"storage/products/{path.name}")
             keyboard = InlineKeyboardMarkup()
@@ -1566,6 +1686,7 @@ def init_telegram(crd, *_):
                 keyboard.add(InlineKeyboardButton("🔄 Обновить", callback_data=f"tdm-lots:lot:{ref}"))
             keyboard.add(InlineKeyboardButton("📋 Настроить состав", callback_data=f"tdm-lots:edit:{ref}"))
             keyboard.add(InlineKeyboardButton("📅 Сроки и состав", callback_data=f"tdm-lots:bundle:{ref}"))
+            keyboard.add(InlineKeyboardButton("🔌 Диагностика связи", callback_data=f"tdm-lots:diagnose:{ref}"))
             keyboard.add(lot_code_button(InlineKeyboardButton, ref))
             keyboard.add(InlineKeyboardButton("⬅️ К лотам", callback_data="tdm-lots:page:0"))
             reply(chat, text, keyboard, lot_code=ref)
