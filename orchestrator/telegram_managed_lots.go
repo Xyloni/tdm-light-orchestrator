@@ -27,15 +27,23 @@ type lotCatalogCampaign struct {
 func (s *scheduler) telegramManagedLots() bot.SettingsPanel {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	text := fmt.Sprintf("📚 Каталог кампаний: %d\n🔗 Настроено лотов: %d\n\nЧтобы включить автоматическую проверку, откройте выбранный лот в боте Cardinal.", len(s.state.LotCatalog), len(s.state.ManagedLots))
+	text := fmt.Sprintf("📋 Сохранённых составов · %d\n📚 Кампаний в каталоге · %d", len(s.state.ManagedLots), len(s.state.LotCatalog))
 	return bot.SettingsPanel{Title: "🏷 Лоты", Text: text, Buttons: [][]bot.SettingsButton{
-		{{Label: "📚 Каталог", Action: "lot-catalog-page:0"}, {Label: "➕ Добавить кампанию", Action: "prompt:lot-catalog"}},
-		{{Label: "🔎 Загрузить кампании из Twitch", Action: "prompt:lot-discover"}},
-		{{Label: "🎒 Найти в инвентаре аккаунта", Action: "prompt:lot-inventory"}},
-		{{Label: "📋 Состав лота", Action: "lb-list:0"}},
-		{{Label: "📎 Загрузить аккаунты лотов", Action: "prompt:upload:lot-credentials"}},
-		{{Label: "🔎 Ручной предпросмотр", Action: "lot-preview"}},
+		{{Label: "📋 Составы лотов", Action: "lb-list:0"}},
+		{{Label: "📚 Каталог кампаний", Action: "lot-catalog-page:0"}},
+		{{Label: "⚙️ Дополнительно", Action: "lot-tools"}},
 		{{Label: "🏠 В меню", Action: "menu"}},
+	}}
+}
+
+func telegramLotTools() bot.SettingsPanel {
+	return bot.SettingsPanel{Title: "⚙️ Лоты · дополнительно", Buttons: [][]bot.SettingsButton{
+		{{Label: "⌨️ Ввести код лота", Action: "prompt:lb-code"}},
+		{{Label: "➕ Добавить кампанию по ID", Action: "prompt:lot-catalog"}},
+		{{Label: "🎒 Искать в инвентаре по логину", Action: "prompt:lot-inventory"}},
+		{{Label: "📎 Загрузить аккаунты лотов", Action: "prompt:upload:lot-credentials"}},
+		{{Label: "🔎 Ручной предпросмотр по коду", Action: "lot-preview"}},
+		{{Label: "⬅️ К лотам", Action: "managed-lots"}},
 	}}
 }
 
@@ -245,7 +253,7 @@ func (s *scheduler) discoverLotCampaigns(query, login string) (int, error) {
 	cfg := s.miner
 	s.mu.Unlock()
 	if len(accounts) == 0 && login != "" {
-		return 0, fmt.Errorf("аккаунт не найден. Загрузите его полный TXT в «Лоты → Загрузить аккаунты лотов»")
+		return 0, fmt.Errorf("аккаунт не найден. Загрузите его полный TXT в «Лоты → Дополнительно → Загрузить аккаунты лотов»")
 	}
 	if len(accounts) == 0 && len(history) == 0 {
 		return 0, fmt.Errorf("для каталога нужен хотя бы один аккаунт Twitch")

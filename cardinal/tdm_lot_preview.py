@@ -15,11 +15,11 @@ import time
 from pathlib import Path
 from contextlib import nullcontext
 import re
-from threading import BoundedSemaphore, Lock, RLock, Thread
+from threading import BoundedSemaphore, Lock, RLock, Thread, local
 from urllib import error, parse, request
 
 NAME = "TDM Drops lots"
-VERSION = "0.4.5"
+VERSION = "0.4.6"
 DESCRIPTION = "Checks Twitch Drops, guards Cardinal delivery and retires configured lots."
 CREDITS = "TDM Light Orchestrator"
 UUID = "b66cfbb9-9fe6-40e1-b9da-cf1d0e326542"
@@ -1544,6 +1544,7 @@ def init_telegram(crd, *_):
     crd.tdm_lot_automation = automation
     if tg is None:
         return
+    from telebot.apihelper import ApiTelegramException
     from telebot.types import InlineKeyboardButton, InlineKeyboardMarkup
 
     bot = tg.bot
@@ -1551,6 +1552,7 @@ def init_telegram(crd, *_):
     diagnosing = Lock()
     detach_lock = Lock()
     detach_confirmations = {}
+    callback_card = local()
     products_dir = Path("storage/products").resolve()
 
     def authorized(message, sender):
@@ -1575,20 +1577,55 @@ def init_telegram(crd, *_):
         title, _, body = text.partition("\n\n")
         formatted = html.escape(text) if lot_code is None else (
             f"{html.escape(title)}\n\nКод лота · <code>{html.escape(lot_code)}</code>\n{html.escape(body)}")
+        card_chat, message_id = getattr(callback_card, "target", (None, None))
+        if keyboard is not None and card_chat == chat and message_id is not None:
+            try:
+                bot.edit_message_text(formatted, chat_id=chat, message_id=message_id,
+                                      parse_mode="HTML", reply_markup=keyboard)
+                return
+            except ApiTelegramException as exc:
+                if exc.error_code != 400:
+                    raise
+                description = exc.description.casefold()
+                if "message is not modified" in description:
+                    return
+                if not any(reason in description for reason in (
+                    "message to edit not found", "message can't be edited", "message_id_invalid",
+                    "message identifier is not specified", "there is no text in the message to edit",
+                )):
+                    raise
         bot.send_message(chat, formatted, parse_mode="HTML", reply_markup=keyboard)
+
+    def lot_status(title, lot):
+        if lot is None:
+            if not crd.autodelivery_enabled or crd.AD_CFG[title].getboolean("disable", fallback=False):
+                return "Выдача выключена"
+            return "Штатная выдача"
+        if lot.get("handoff"):
+            return "Отвязка"
+        if lot["retired"]:
+            return "Снят с продажи" if lot["inactive_since"] else "Ожидает снятия"
+        return "Подключён"
+
+    def lot_back(ref):
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("⬅️ К лоту", callback_data=f"tdm-lots:lot:{ref}"))
+        return keyboard
 
     def show_lots(chat, page):
         entries = sorted(lots().items(), key=lambda entry: entry[1][0].casefold())
         page = max(0, min(page, max(0, len(entries) - 1) // 8))
         keyboard = InlineKeyboardMarkup()
         for ref, (title, _) in entries[page * 8:(page + 1) * 8]:
-            keyboard.add(InlineKeyboardButton(title[:55], callback_data="tdm-lots:lot:" + ref))
+            status = lot_status(title, automation.data.get(ref))
+            keyboard.add(InlineKeyboardButton(f"{status} · {title[:43]}", callback_data="tdm-lots:lot:" + ref))
         if page:
             keyboard.add(InlineKeyboardButton("Назад", callback_data=f"tdm-lots:page:{page-1}"))
         if (page + 1) * 8 < len(entries):
             keyboard.add(InlineKeyboardButton("Дальше", callback_data=f"tdm-lots:page:{page+1}"))
-        if automation.data:
-            keyboard.add(InlineKeyboardButton("⚠️ Заказы требуют внимания", callback_data="tdm-lots:attention:all/0"))
+        unresolved = len(automation.attention_orders())
+        if unresolved:
+            keyboard.add(InlineKeyboardButton(f"⚠️ Заказы требуют внимания · {unresolved}", callback_data="tdm-lots:attention:all/0"))
         keyboard.add(InlineKeyboardButton("🔌 Диагностика связи", callback_data="tdm-lots:diagnose:link"))
         text = "🏷 Лоты Twitch Drops\n\nВыберите запись автовыдачи Cardinal." if entries else "Нет записей автовыдачи с доступным TXT."
         reply(chat, text, keyboard)
@@ -1674,18 +1711,19 @@ def init_telegram(crd, *_):
 
     def enable_lot(chat, ref, item, offer_id, product_format):
         title, path = item
+        keyboard = lot_back(ref)
         try:
             bundle = automation.enable(ref, title, path.name, offer_id, product_format, chat)
         except ValueError as exc:
-            reply(chat, f"⚠️ {exc}")
+            reply(chat, f"⚠️ {exc}", keyboard)
         except error.HTTPError as exc:
-            reply(chat, f"⚠️ Оркестратор ответил HTTP {exc.code}. Проверьте связь и состав лота.")
+            reply(chat, f"⚠️ Оркестратор ответил HTTP {exc.code}. Проверьте связь и состав лота.", keyboard)
         except Exception as exc:
             LOG.warning("TDM: listing %s could not be enabled (%s)", offer_id, type(exc).__name__)
-            reply(chat, "⚠️ Проверьте ID лота, доступность TXT и связь с оркестратором.")
+            reply(chat, "⚠️ Проверьте ID лота, доступность TXT и связь с оркестратором.", keyboard)
         else:
             reply(chat, f"✅ Лот #{offer_id} подключён.\n{bundle['Game']} · наград в наборе: {len(bundle['Rewards'])}.\n"
-                        "Проверка остатка и автовыдачи работают в фоне.")
+                        "Проверка остатка и автовыдачи работают в фоне.", keyboard)
 
     def enable_command(message):
         if not authorized(message, message.from_user):
@@ -1754,12 +1792,19 @@ def init_telegram(crd, *_):
         Thread(target=run, daemon=True).start()
 
     def handle(call):
-        if not authorized(call.message, call.from_user):
-            bot.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
+        message = call.message
+        if message is None or not authorized(message, call.from_user):
             return
         _, action, value = call.data.split(":", 2)
-        chat = call.message.chat.id
-        bot.answer_callback_query(call.id)
+        chat = message.chat.id
+        callback_card.target = (chat, getattr(message, "message_id", None))
+        try:
+            navigate(chat, action, value)
+        finally:
+            del callback_card.target
+
+    def navigate(chat, action, value):
         if action == "page" and value.isdecimal():
             show_lots(chat, int(value))
             return
@@ -1785,21 +1830,40 @@ def init_telegram(crd, *_):
             return
         title, path = item
         product_lock = cardinal_tools.get_products_file_lock(f"storage/products/{path.name}")
+        lot = automation.data.get(ref)
         if action == "diagnose" and value == ref:
             show_diagnostics(chat, ref, path, product_lock)
             return
+        if action == "manage":
+            keyboard = InlineKeyboardMarkup()
+            keyboard.add(InlineKeyboardButton("🔌 Проверить доступ к Twitch", callback_data=f"tdm-lots:diagnose:{ref}"))
+            keyboard.add(lot_code_button(InlineKeyboardButton, ref))
+            text = f"⚙️ Управление лотом\n\n{title[:150]}"
+            if lot is not None:
+                keyboard.add(InlineKeyboardButton("🔌 Отвязать от оркестратора", callback_data=f"tdm-lots:detach:{ref}"))
+                text += "\n\nПеред отвязкой скройте лот на FunPay и завершите открытые заказы."
+            keyboard.add(InlineKeyboardButton("⬅️ К лоту", callback_data=f"tdm-lots:lot:{ref}"))
+            reply(chat, text, keyboard, lot_code=ref)
+            return
+        if action == "check":
+            if lot is None:
+                keyboard = InlineKeyboardMarkup()
+                keyboard.add(InlineKeyboardButton("Логин:пароль", callback_data=f"tdm-lots:run:{ref}/login-password"),
+                             InlineKeyboardButton("Полный TXT", callback_data=f"tdm-lots:run:{ref}/full"))
+                keyboard.add(InlineKeyboardButton("⬅️ К лоту", callback_data=f"tdm-lots:lot:{ref}"))
+                reply(chat, "🔎 Проверка до 10 аккаунтов\n\nВыберите формат товарного TXT.", keyboard)
+                return
+            action, product_format = "run", lot["format"]
+        if action == "setup" and lot is not None:
+            action = "lot"
         if action == "lot":
             count = cardinal_tools.count_products(f"storage/products/{path.name}")
             keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("🔎 Проверить логин:пароль", callback_data=f"tdm-lots:run:{ref}/login-password"))
-            keyboard.add(InlineKeyboardButton("🔎 Проверить полный TXT", callback_data=f"tdm-lots:run:{ref}/full"))
-            text = f"{title[:150]}\n\nФайл · {path.name}\nОстаток в Cardinal · {count}"
-            lot = automation.data.get(ref)
+            text = f"{title[:150]}\n\nСтатус · {lot_status(title, lot)}\nОстаток в Cardinal · {count}\nФайл · {path.name}"
             if lot is None:
-                keyboard.add(InlineKeyboardButton("⚙️ Настроить автоматизацию", callback_data=f"tdm-lots:setup:{ref}"))
-                text += "\n\nРучная проверка охватывает первые 10 аккаунтов."
+                keyboard.add(InlineKeyboardButton("🔗 Подключить лот", callback_data=f"tdm-lots:setup:{ref}"))
             else:
-                text += f"\n\n⚙️ Лот FunPay #{lot['id']} · автоматизация включена."
+                text += f"\nЛот FunPay · #{lot['id']}"
                 if lot["deadline"]:
                     cutoff = dt.datetime.fromisoformat(lot["deadline"]["at"])
                     text += f"\n📅 Снятие по дате · {cutoff:%d.%m.%Y %H:%M} МСК"
@@ -1828,51 +1892,67 @@ def init_telegram(crd, *_):
                 if unresolved:
                     keyboard.add(InlineKeyboardButton(f"⚠️ Заказы требуют внимания · {unresolved}",
                                                       callback_data=f"tdm-lots:attention:{ref}/0"))
-                keyboard.add(InlineKeyboardButton("🔄 Обновить", callback_data=f"tdm-lots:lot:{ref}"))
-                keyboard.add(InlineKeyboardButton("🔌 Отвязать от оркестратора", callback_data=f"tdm-lots:detach:{ref}"))
-            keyboard.add(InlineKeyboardButton("📋 Настроить состав", callback_data=f"tdm-lots:edit:{ref}"))
-            keyboard.add(InlineKeyboardButton("📅 Сроки и состав", callback_data=f"tdm-lots:bundle:{ref}"))
-            keyboard.add(InlineKeyboardButton("🔌 Диагностика связи", callback_data=f"tdm-lots:diagnose:{ref}"))
-            keyboard.add(lot_code_button(InlineKeyboardButton, ref))
+                keyboard.add(InlineKeyboardButton("📋 Состав и сроки", callback_data=f"tdm-lots:bundle:{ref}"))
+            keyboard.add(InlineKeyboardButton("🔎 Проверить до 10 аккаунтов", callback_data=f"tdm-lots:check:{ref}"))
+            keyboard.add(InlineKeyboardButton("🔄 Обновить", callback_data=f"tdm-lots:lot:{ref}"),
+                         InlineKeyboardButton("⚙️ Управление", callback_data=f"tdm-lots:manage:{ref}"))
             keyboard.add(InlineKeyboardButton("⬅️ К лотам", callback_data="tdm-lots:page:0"))
-            reply(chat, text, keyboard, lot_code=ref)
+            reply(chat, text, keyboard)
             return
-        if action == "setup":
+        if action in ("setup", "edit"):
+            keyboard = InlineKeyboardMarkup()
+            try:
+                with automation.lock, product_lock:
+                    blocked = automation.blocked_logins(lot) if lot else set()
+                    sold = set(lot["sold"]) if lot else set()
+                    sample = lot_stock_sample(path, blocked, sold)
+                registration = managed_request(ref, "register", title=title, sample=sample)
+                if registration.get("state") != "registered":
+                    raise ValueError("Registration was not acknowledged")
+                try:
+                    bundle = managed_request(ref) if action == "setup" else None
+                except error.HTTPError as exc:
+                    if exc.code != 404:
+                        raise
+                    bundle = None
+            except (OSError, ValueError, TypeError, AttributeError):
+                keyboard.add(InlineKeyboardButton("🔌 Проверить связь", callback_data="tdm-lots:diagnose:link"))
+                keyboard.add(InlineKeyboardButton("⬅️ К лоту", callback_data=f"tdm-lots:lot:{ref}"))
+                reply(chat, "Не удалось открыть настройку состава. Проверьте связь с оркестратором и доступность TXT.", keyboard)
+                return
+            if not bundle or not bundle.get("Rewards"):
+                username = registration.get("telegram_username", "")
+                if isinstance(username, str) and re.fullmatch(r"[A-Za-z0-9_]{5,32}", username):
+                    keyboard.add(InlineKeyboardButton("📋 Открыть состав в оркестраторе", url=f"https://t.me/{username}?start=lot_{ref}"))
+                    instructions = "Откройте оркестратор и сохраните состав наград."
+                else:
+                    instructions = "Откройте в оркестраторе «Лоты → Составы лотов», выберите этот лот и сохраните состав наград."
+                if action == "setup":
+                    keyboard.add(InlineKeyboardButton("➡️ Продолжить подключение", callback_data=f"tdm-lots:setup:{ref}"))
+                    instructions += " Затем вернитесь сюда и продолжите подключение."
+                keyboard.add(InlineKeyboardButton("⬅️ К лоту", callback_data=f"tdm-lots:lot:{ref}"))
+                reply(chat, f"📋 Состав лота\n\n{title[:150]}\n\n{instructions}", keyboard)
+                return
+
             profile = crd.tg_profile or crd.profile
             candidates = [offer for offer in profile.get_sorted_lots(1).values()
                           if same_lot_title(title, offer.description)] if profile is not None else []
             if len(candidates) != 1:
-                reply(chat, f"Сохраните состав лота в боте оркестратора по коду {ref}.\n\n"
-                            "Укажите ID из ссылки FunPay offer?id=… и формат файла.\n"
-                            f"/tdm_lot_enable {ref} ID login-password\nДля полного TXT замените login-password на full.")
+                reply(chat, "✅ Состав сохранён.\n\nНе удалось определить ID предложения FunPay. "
+                            "Возьмите ID из ссылки offer?id=… и подставьте его в команду. "
+                            "Для полного TXT замените login-password на full.\n\n"
+                            f"/tdm_lot_enable {ref} ID login-password", lot_back(ref))
                 return
             offer_id = candidates[0].id
-            keyboard = InlineKeyboardMarkup()
             for short, label in (("lp", "Логин:пароль"), ("txt", "Полный TXT")):
-                keyboard.add(InlineKeyboardButton(label, callback_data=f"tdm-lots:enable:{ref}/{offer_id}/{short}"))
+                keyboard.add(InlineKeyboardButton(f"Подключить · {label}", callback_data=f"tdm-lots:enable:{ref}/{offer_id}/{short}"))
             keyboard.add(InlineKeyboardButton("⬅️ Отмена", callback_data=f"tdm-lots:lot:{ref}"))
-            reply(chat, f"⚙️ Автоматизация лота #{offer_id}\n\nСначала сохраните состав в боте оркестратора по коду {ref}.\n"
-                        "Выбор формата включает проверку перед выдачей и автоматическое снятие лота.", keyboard)
-            return
-        if action == "edit":
-            keyboard = InlineKeyboardMarkup()
-            keyboard.add(InlineKeyboardButton("⬅️ К лоту", callback_data=f"tdm-lots:lot:{ref}"))
-            try:
-                with automation.lock, product_lock:
-                    lot = automation.data.get(ref)
-                    blocked = automation.blocked_logins(lot) if lot else set()
-                    sold = set(lot["sold"]) if lot else set()
-                    sample = lot_stock_sample(path, blocked, sold)
-                if managed_request(ref, "register", title=title, sample=sample).get("state") != "registered":
-                    raise ValueError("Registration was not acknowledged")
-            except (OSError, ValueError, TypeError):
-                reply(chat, "Не удалось передать лот. Проверьте связь с оркестратором и его версию.", keyboard)
-                return
-            reply(chat, "✅ Лот появился в боте оркестратора. Откройте «Лоты → Состав лота» и выберите его по названию."
-                        " Для поиска в инвентаре оркестратор сам возьмёт аккаунты из этого лота.", keyboard)
+            reply(chat, f"🔗 Подключение лота #{offer_id}\n\n✅ Состав сохранён · {len(bundle['Rewards'])} наград.\n"
+                        "Выберите формат товарного TXT, чтобы включить автоматизацию.", keyboard)
             return
         if action == "bundle":
             keyboard = InlineKeyboardMarkup()
+            keyboard.add(InlineKeyboardButton("📋 Изменить состав", callback_data=f"tdm-lots:edit:{ref}"))
             keyboard.add(InlineKeyboardButton("⬅️ К лоту", callback_data=f"tdm-lots:lot:{ref}"))
             try:
                 bundle = managed_request(ref)
@@ -1905,6 +1985,7 @@ def init_telegram(crd, *_):
             return
 
         def run():
+            keyboard = lot_back(ref)
             try:
                 try:
                     bundle = managed_request(ref)
@@ -1925,7 +2006,7 @@ def init_telegram(crd, *_):
                     reply(chat, f"🔎 {bundle['Game']} · наград в наборе: {len(bundle['Rewards'])}\n\n"
                                 f"Проверено · {len(states)} из {len(rows)}\n"
                                 f"Набор подтверждён Twitch · {ready}\nНужные награды отсутствуют · {missing}\n"
-                                f"Данных для вывода недостаточно · {len(states) - ready - missing}")
+                                f"Данных для вывода недостаточно · {len(states) - ready - missing}", keyboard)
                     return
                 result = preview_settings({"format": product_format, "products_path": str(path),
                                            "lot_id": ref, "lot_ref": ref, "use_telegram_selection": True}, product_lock)
@@ -1948,16 +2029,20 @@ def init_telegram(crd, *_):
                     text += "\n\n" + "\n".join(detail[:5])
                 if result["products_changed"]:
                     text += "\n\nTXT изменился во время проверки. Запусти её заново."
-                reply(chat, text)
+                reply(chat, text, keyboard)
             except error.HTTPError as exc:
-                reply(chat, f"Оркестратор ответил HTTP {exc.code}. Проверь связь и сохрани привязку кампаний для кода этого лота в боте оркестратора.")
+                reply(chat, f"Оркестратор ответил HTTP {exc.code}. Проверьте связь и сохранённый состав лота.", keyboard)
             except (OSError, ValueError, KeyError, TypeError):
-                reply(chat, "Проверка не запустилась. Проверь связь с оркестратором и формат TXT.")
+                reply(chat, "Проверка не запустилась. Проверьте связь с оркестратором и формат TXT.", keyboard)
             finally:
                 running.release()
 
-        Thread(target=run, daemon=True).start()
-        reply(chat, "Проверка запущена. Результат появится в этом чате.")
+        try:
+            reply(chat, "Проверка запущена. Результат появится в этом чате.")
+            Thread(target=run, daemon=True).start()
+        except Exception:
+            running.release()
+            raise
 
     tg.msg_handler(open_menu, commands=["tdm_lots"])
     tg.msg_handler(enable_command, commands=["tdm_lot_enable"])

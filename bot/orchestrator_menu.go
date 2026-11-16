@@ -2,11 +2,37 @@ package bot
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var telegramUsername = regexp.MustCompile(`^[a-zA-Z0-9_]{5,32}$`)
+
+// Username returns the public Telegram username for this bot when available.
+func (b *Bot) Username(ctx context.Context) string {
+	b.usernameMu.Lock()
+	defer b.usernameMu.Unlock()
+	now := time.Now()
+	if now.Before(b.usernameExpires) {
+		return b.username
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	var account struct {
+		Username string `json:"username"`
+	}
+	b.username = ""
+	b.usernameExpires = now.Add(30 * time.Second)
+	if err := b.settingsRequestResult(ctx, "getMe", struct{}{}, &account); err == nil && telegramUsername.MatchString(account.Username) {
+		b.username = account.Username
+		b.usernameExpires = now.Add(10 * time.Minute)
+	}
+	return b.username
+}
 
 func (b *Bot) ConfigureOrchestratorMenu(menu func(string) SettingsPanel, upload func(string, []byte) error) {
 	b.orchestratorMenu = menu
@@ -80,6 +106,11 @@ func (b *Bot) handleOrchestratorText(ctx context.Context, cmd, args, text string
 	case cmd == "/start":
 		b.registerOrchestratorMenu(ctx)
 		action = "menu"
+		if ref, ok := strings.CutPrefix(args, "lot_"); ok && len(ref) == 24 {
+			if _, err := hex.DecodeString(ref); err == nil {
+				action = "lb-start:" + strings.ToLower(ref)
+			}
+		}
 	case cmd == "/menu" || cmd == "/games" || cmd == "/settings" || cmd == "/status":
 		action = strings.TrimPrefix(cmd, "/")
 	case cmd == "/download_logs":

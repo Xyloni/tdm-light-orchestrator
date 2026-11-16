@@ -127,7 +127,7 @@ func TestTelegramLotCatalogDeletionPreservesSavedBundle(t *testing.T) {
 		t.Fatalf("editor did not restore saved partial selection: %+v", detail)
 	}
 	back := s.telegramMenu(catalogAction(t, detail, "К кампаниям"))
-	review := s.telegramMenu(catalogAction(t, back, "Проверить состав"))
+	review := s.telegramMenu(catalogAction(t, back, "Просмотреть и сохранить"))
 	result := s.telegramMenu(catalogAction(t, review, "Сохранить состав"))
 	if !strings.Contains(result.Text, "Состав сохранён") || !reflect.DeepEqual(s.state.ManagedLots[ref], savedBundle) {
 		t.Fatalf("editing the preserved bundle changed its saved rewards: %+v", result)

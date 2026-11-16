@@ -49,13 +49,15 @@ func runOnce(parent context.Context, dir, address string) error {
 	logs := filepath.Join(dir, "logs")
 	journal := &dailylog.Writer{Dir: logs, Name: "orchestrator"}
 	defer journal.Close()
+	bots := &botRuntime{}
 	s := &scheduler{
 		journal: log.New(journal, "", log.LstdFlags),
 		path:    path, state: current, miner: *cfg, active: make(map[string]*activeGame),
 		updates: make(chan processUpdate, 128), catalogs: make(chan discoveryResult, 1),
 		retry: make(map[string]time.Time), botChanges: make(chan struct{}, 1),
-		restartRequests: make(chan struct{}, 1),
-		claimCtx:        ctx,
+		restartRequests:  make(chan struct{}, 1),
+		claimCtx:         ctx,
+		telegramUsername: bots.telegramUsername,
 	}
 	host, _, err := net.SplitHostPort(address)
 	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
@@ -110,7 +112,6 @@ func runOnce(parent context.Context, dir, address string) error {
 		stopBots()
 		<-botsDone
 	}()
-	bots := &botRuntime{}
 	s.notify = bots.notify
 	s.initializeStats(time.Now())
 	s.event("orchestrator_started")

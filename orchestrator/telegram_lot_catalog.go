@@ -52,7 +52,7 @@ func (s *scheduler) lotCatalogSelection(ref string) (string, map[string]lotCatal
 }
 
 func (s *scheduler) lotCatalogPanel(value string) bot.SettingsPanel {
-	panel := bot.SettingsPanel{Title: "📚 Каталог лотов"}
+	panel := bot.SettingsPanel{Title: "📚 Каталог кампаний"}
 	ref, page, _ := strings.Cut(value, ":")
 	if _, err := strconv.Atoi(ref); err == nil {
 		games := make(map[string]string)
@@ -77,7 +77,7 @@ func (s *scheduler) lotCatalogPanel(value string) bot.SettingsPanel {
 			panel.Text = "Каталог пока пуст."
 		}
 		bundlePageRows(&panel, ref, buttons, func(p int) string { return lotCatalogPage + strconv.Itoa(p) })
-		bundleButton(&panel, "➕ Добавить кампанию", "prompt:lot-catalog")
+		bundleButton(&panel, "🔎 Найти кампанию", "prompt:lot-discover")
 		bundleButton(&panel, "🏷 К лотам", "managed-lots")
 		return panel
 	}

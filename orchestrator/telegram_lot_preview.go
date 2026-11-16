@@ -26,14 +26,14 @@ func validLotRef(ref string) bool {
 func (s *scheduler) telegramLotPreview(kind, value string) bot.SettingsPanel {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	panel := bot.SettingsPanel{Title: "Предпросмотр лота"}
+	panel := bot.SettingsPanel{Title: "Ручной предпросмотр по коду"}
 	row := func(label, action string) {
 		panel.Buttons = append(panel.Buttons, []bot.SettingsButton{{Label: label, Action: action}})
 	}
 	if kind == "lot-preview" {
 		panel.Text = fmt.Sprintf("Сохранено привязок: %d. Открой лот в Cardinal и скопируй его код.", len(s.state.LotPreviews))
-		row("Привязать или изменить лот", "prompt:lot-link")
-		row("В меню", "menu")
+		row("Выбрать кампании для предпросмотра", "prompt:lot-link")
+		row("⬅️ Дополнительно", "lot-tools")
 		return panel
 	}
 	if kind == "lot-preview-link" || kind == "lot-preview-games" {
@@ -71,7 +71,7 @@ func (s *scheduler) telegramLotPreview(kind, value string) bot.SettingsPanel {
 		if end < len(keys) {
 			row("Следующая", fmt.Sprintf("lot-preview-games:%d", page+1))
 		}
-		row("В меню", "menu")
+		row("⬅️ К предпросмотру", "lot-preview")
 		return panel
 	}
 	ref, arg, _ := strings.Cut(value, ":")

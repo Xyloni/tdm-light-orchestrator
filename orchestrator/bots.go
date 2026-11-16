@@ -47,6 +47,7 @@ type botSettings struct {
 type botRuntime struct {
 	mu       sync.RWMutex
 	services []*bot.Service
+	telegram *bot.Bot
 }
 
 func (b *botRuntime) notify(message string) {
@@ -57,10 +58,21 @@ func (b *botRuntime) notify(message string) {
 	}
 }
 
-func (b *botRuntime) publish(services []*bot.Service) {
+func (b *botRuntime) publish(services []*bot.Service, telegram *bot.Bot) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.services = services
+	b.telegram = telegram
+}
+
+func (b *botRuntime) telegramUsername(ctx context.Context) string {
+	b.mu.RLock()
+	telegram := b.telegram
+	b.mu.RUnlock()
+	if telegram == nil {
+		return ""
+	}
+	return telegram.Username(ctx)
 }
 
 func (s *scheduler) legacyBotSettings() []botSettings {
@@ -145,7 +157,7 @@ func (s *scheduler) runBots(ctx context.Context, runtime *botRuntime) {
 		current := s.configuredBots()
 		s.mu.Unlock()
 		if !slices.Equal(current, previous) {
-			runtime.publish(nil)
+			runtime.publish(nil, nil)
 			stop()
 			stop = s.startBotServices(ctx, runtime, current)
 			previous = current
@@ -162,6 +174,7 @@ func (s *scheduler) startBotServices(ctx context.Context, runtime *botRuntime, c
 	serviceCtx, cancel := context.WithCancel(ctx)
 	var workers sync.WaitGroup
 	var services []*bot.Service
+	var telegram *bot.Bot
 	for _, entry := range current {
 		var control bot.Control
 		switch entry.Platform {
@@ -171,7 +184,7 @@ func (s *scheduler) startBotServices(ctx context.Context, runtime *botRuntime, c
 				log.Print("orchestrator: invalid saved Telegram owner ID")
 				continue
 			}
-			telegram := bot.New(entry.Token, id, nil, nil, nil, nil, nil, s.upload)
+			telegram = bot.New(entry.Token, id, nil, nil, nil, nil, nil, s.upload)
 			telegram.ConfigureOrchestrator(s.command)
 			telegram.ConfigureOrchestratorMenu(s.telegramMenu, s.telegramUpload)
 			s.trackTelegramMenu(telegram, entry)
@@ -190,6 +203,6 @@ func (s *scheduler) startBotServices(ctx context.Context, runtime *botRuntime, c
 		workers.Add(1)
 		go func() { defer workers.Done(); service.Run(serviceCtx) }()
 	}
-	runtime.publish(services)
+	runtime.publish(services, telegram)
 	return func() { cancel(); workers.Wait() }
 }

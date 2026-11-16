@@ -54,6 +54,7 @@ type scheduler struct {
 	journal          *log.Logger
 	categoryNames    []string
 	botChanges       chan struct{}
+	telegramUsername func(context.Context) string
 	mu               sync.Mutex
 	path             string
 	state            *state

@@ -113,7 +113,7 @@ func TestTelegramLotBundleSelectsRewardsWithoutIDs(t *testing.T) {
 	panel = press(panel, "Second")
 	panel = press(panel, "Выбрать все награды")
 	panel = press(panel, "К кампаниям")
-	panel = press(panel, "Проверить состав")
+	panel = press(panel, "Просмотреть и сохранить")
 	if len(s.state.ManagedLots) != 0 || !strings.Contains(panel.Text, "2. Same Name") {
 		t.Fatalf("incorrect preview: %s", panel.Text)
 	}
@@ -128,5 +128,29 @@ func TestTelegramLotBundleSelectsRewardsWithoutIDs(t *testing.T) {
 	panel = press(s.telegramMenu("lb-list:0"), title)
 	if !strings.Contains(press(panel, "First").Text, "1 из 2") {
 		t.Fatal("saved partial selection not restored")
+	}
+}
+
+func TestTelegramLotSearchOpensRewardsFromRegisteredDeepLink(t *testing.T) {
+	s := testScheduler(t, time.Now())
+	const ref = "0123456789abcdef01234567"
+	open := "lb-start:" + ref
+	if panel := s.telegramMenu(open); s.lotBundleDraft != nil || !strings.Contains(panel.Text, "Лот ещё не добавлен") {
+		t.Fatalf("unregistered link opened an editor: %+v", panel)
+	}
+	if err := s.registerLotTitle(ref, "Example listing", nil); err != nil {
+		t.Fatal(err)
+	}
+	addCatalogFixture(t, s, "Example Game", "one", "Example Campaign")
+	editor := s.telegramMenu(open)
+	search := s.telegramMenu(catalogAction(t, editor, "Найти кампанию"))
+	matches := s.telegramMenu(search.Input + "\nexample campaign")
+	rewards := s.telegramMenu(catalogAction(t, matches, "Example Campaign"))
+	if !strings.Contains(rewards.Text, "Отмечено наград: 0 из 1") || s.lotBundleDraft.Game != "example game" {
+		t.Fatalf("search result did not open rewards: %+v", rewards)
+	}
+	rewards = s.telegramMenu(catalogAction(t, rewards, "Выбрать все награды"))
+	if !strings.Contains(rewards.Text, "Черновик · выбрано 1") || len(s.state.ManagedLots) != 0 {
+		t.Fatalf("selection should update only the draft: %+v", rewards)
 	}
 }

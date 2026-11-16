@@ -124,7 +124,7 @@ func (s *scheduler) discoverLotSampleCampaigns(query, draftToken string) (int, e
 	if !time.Now().Before(sample.expires) {
 		delete(s.lotSamples, draft.Ref)
 		s.mu.Unlock()
-		return 0, fmt.Errorf("откройте лот в Cardinal и нажмите «Настроить состав», чтобы обновить выборку из TXT")
+		return 0, fmt.Errorf("откройте лот в Cardinal и снова откройте состав в оркестраторе, чтобы обновить выборку из TXT")
 	}
 	if len(sample.accounts) == 0 {
 		s.mu.Unlock()
@@ -134,7 +134,7 @@ func (s *scheduler) discoverLotSampleCampaigns(query, draftToken string) (int, e
 	cfg := s.miner
 	s.mu.Unlock()
 	if len(accounts) == 0 {
-		return 0, fmt.Errorf("для аккаунтов из TXT нужны данные Twitch. Загрузите полный TXT в «Лоты → Загрузить аккаунты лотов» и повторите поиск")
+		return 0, fmt.Errorf("для аккаунтов из TXT нужны данные Twitch. Загрузите полный TXT в «Лоты → Дополнительно → Загрузить аккаунты лотов» и повторите поиск")
 	}
 	cfg.Diagnostics = false
 	client := &http.Client{Timeout: 4 * time.Second}

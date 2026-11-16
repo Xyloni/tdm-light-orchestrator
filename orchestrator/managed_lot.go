@@ -303,7 +303,13 @@ func (s *scheduler) serveManagedLot(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"state": "registered"})
+		result := map[string]string{"state": "registered"}
+		if s.telegramUsername != nil {
+			if username := s.telegramUsername(r.Context()); username != "" {
+				result["telegram_username"] = username
+			}
+		}
+		_ = json.NewEncoder(w).Encode(result)
 		return
 	}
 	if !validLotLogin(req.Login) ||

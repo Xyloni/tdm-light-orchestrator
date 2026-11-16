@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -45,6 +46,9 @@ type Bot struct {
 	adminID               int64
 	http                  *http.Client
 	pollState             *PollState
+	usernameMu            sync.Mutex
+	username              string
+	usernameExpires       time.Time
 
 	statusFn      func() string
 	logsFn        func(login string) string
