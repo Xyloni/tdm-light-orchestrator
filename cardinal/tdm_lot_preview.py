@@ -19,7 +19,7 @@ from threading import BoundedSemaphore, Lock, RLock, Thread, local
 from urllib import error, parse, request
 
 NAME = "TDM Drops lots"
-VERSION = "0.4.6"
+VERSION = "0.4.7"
 DESCRIPTION = "Checks Twitch Drops, guards Cardinal delivery and retires configured lots."
 CREDITS = "TDM Light Orchestrator"
 UUID = "b66cfbb9-9fe6-40e1-b9da-cf1d0e326542"
@@ -388,7 +388,7 @@ def payment_status_text(payment):
         "REFUNDED": "💳 FunPay · заказ возвращён.",
         "PARTIALLY_REFUNDED": "💳 FunPay · частичный возврат.",
         "UNPAID": "💳 FunPay · заказ не оплачен.",
-    }.get(payment, "💳 FunPay · статус оплаты не подтверждён.")
+    }.get(payment, "💳 FunPay · статус оплаты ещё не проверен.")
 
 
 def stock_text(rows):
@@ -1082,6 +1082,31 @@ class LotAutomation:
                                         f"♻️ Лот #{lot['id']} · в свободный пул возвращено {len(returned)}. Ожидают проверки: {len(pending)}.",
                                         pending=pending, retirement_confirmed=sorted(confirmed), returned=total)
 
+    def delivery_message(self, template, order, rows):
+        if "$product" not in template:
+            raise ValueError("В сообщении автовыдачи отсутствует $product.")
+        sections = re.sub(r"\$sleep=\d+(?:\.\d+)?", "", template).split("$new")
+        stock = stock_text(rows)
+        text = self.tools.format_order_text("\n".join(sections), order).replace("$product", stock)
+        text = "\n".join(line for line in text.split("\n") if line.strip())
+        if len(text.split("\n")) > 20 or len(text) > 3500:
+            # Fold only the template prose. Keep each product row on its own line.
+            compact = ["\n$product\n".join(" ".join(part.split()) for part in section.split("$product"))
+                       for section in sections]
+            text = self.tools.format_order_text("\n".join(compact), order).replace("$product", stock)
+            text = "\n".join(line for line in text.split("\n") if line.strip())
+        if len(text) > 3500:
+            raise ValueError("Шаблон с товаром превышает 3500 символов. Сократите текст выдачи.")
+        entities = self.cardinal.parse_message_entities(text)
+        if any(not isinstance(entity, str) for entity in entities):
+            raise ValueError("Шаблон выдачи поддерживает текст. Перенесите вложения в отдельное сообщение.")
+        if len(entities) != 1:
+            raise ValueError("Шаблон с товаром не помещается в одно сообщение. Сократите текст или количество строк.")
+        message = entities[0]
+        if any(line not in message for line in rows.values()):
+            raise ValueError("Шаблон или товар содержит разметку Cardinal, которая меняет строку товара.")
+        return message
+
     def guarded_delivery(self, event, ref, lot):
         from handlers import deliver_product_handler
 
@@ -1134,16 +1159,9 @@ class LotAutomation:
             raise ValueError("Свежая проверка не подтвердила достаточно аккаунтов. Товар остался в TXT.")
         if bundle != managed_request(ref):
             raise ValueError("Состав лота изменился во время проверки.")
-        if "$product" not in section["response"]:
-            raise ValueError("В сообщении автовыдачи отсутствует $product.")
-        text = self.tools.format_order_text(section["response"], event.order)
-        text = text.replace("$product", "\n".join(selected.values()))
         # One outbound message prevents a partially sent order from being
         # mistaken for a complete delivery or returned to stock.
-        entities = self.cardinal.parse_message_entities(text)
-        if len(text) > 3500 or len(text.splitlines()) > 19 or len(entities) != 1 or not isinstance(entities[0], str):
-            raise ValueError("Шаблон или размер выдачи требуют ручной отправки заказа.")
-        text = entities[0]
+        text = self.delivery_message(section["response"], event.order, selected)
         with self.funpay_lock:
             lot = self.refresh_offer(ref)
             chat = self.cardinal.account.get_chat_by_name(event.order.buyer_username)

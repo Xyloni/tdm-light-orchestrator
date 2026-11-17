@@ -1,6 +1,7 @@
 import configparser
 import datetime as dt
 from pathlib import Path
+import re
 import tempfile
 from threading import RLock
 from types import SimpleNamespace
@@ -9,6 +10,27 @@ from unittest.mock import Mock, patch
 import sys
 
 import tdm_lot_preview as plugin
+
+
+def cardinal_message_entities(message):
+    text = "\n".join(line.strip() for line in message.split("\n"))
+    while "\n\n" in text:
+        text = text.replace("\n\n", "\n[a][/a]\n")
+    parts = re.split(r"(\$new|\$sleep=\d+(?:\.\d+)?|\$photo=\d+)", text)
+    entities = []
+    for index, part in enumerate(parts):
+        if index % 2:
+            if part.startswith("$sleep="):
+                entities.append(float(part.removeprefix("$sleep=")))
+            elif part.startswith("$photo="):
+                entities.append(int(part.removeprefix("$photo=")))
+            continue
+        lines = part.strip().split("\n")
+        for start in range(0, len(lines), 20):
+            chunk = "\n".join(lines[start:start + 20])
+            if chunk.strip() and chunk.strip() != "[a][/a]":
+                entities.append(chunk)
+    return entities
 
 
 class ManagedLotsTest(unittest.TestCase):
@@ -70,6 +92,42 @@ class ManagedLotsTest(unittest.TestCase):
         self.assertEqual(self.path.read_text(), "first:fixture")
         self.crd.send_message.assert_called_once_with(77, "second:fixture", "buyer", attempts=1, watermark=False)
         self.assertTrue(self.auto.data[self.ref]["orders"]["ORDER"]["sent"])
+
+    def test_long_cardinal_template_delivers_stock_and_all_instructions(self):
+        instructions = [f"Step {number}. Read this instruction." for number in range(1, 24)]
+        self.crd.AD_CFG["Example lot"]["response"] = (
+            "Thank you, $username!\n\n$product\n\n$new\n$sleep=1.5\n\nInstructions\n\n"
+            + "\n\n".join(instructions) + "\n$new\n$sleep=1.5\n\nOrder link: $order_link"
+        )
+        self.crd.parse_message_entities = cardinal_message_entities
+        self.tools.format_order_text = lambda text, order: text.replace("$username", order.buyer_username).replace(
+            "$order_link", "https://example.invalid/orders/ORDER")
+        self.auto.check = Mock(return_value="ready")
+        with patch.object(plugin, "managed_request", return_value={"Rewards": ["reward"]}):
+            self.auto.guarded_delivery(self.event, self.ref, self.auto.data[self.ref])
+            self.auto.guarded_delivery(self.event, self.ref, self.auto.data[self.ref])
+        self.crd.send_message.assert_called_once()
+        text = self.crd.send_message.call_args.args[1]
+        self.assertEqual(cardinal_message_entities(text), [text])
+        self.assertIn("Thank you, buyer!", text)
+        self.assertIn("first:fixture", text.splitlines())
+        self.assertIn("https://example.invalid/orders/ORDER", text)
+        for instruction in instructions:
+            self.assertIn(instruction, text)
+        self.assertEqual(self.path.read_text(), "second:fixture")
+        self.assertTrue(self.auto.data[self.ref]["orders"]["ORDER"]["sent"])
+
+    def test_delivery_template_attachment_leaves_stock_and_reservation_untouched(self):
+        self.crd.AD_CFG["Example lot"]["response"] = "Instructions\n$photo=25\n$product"
+        self.crd.parse_message_entities = cardinal_message_entities
+        self.auto.check = Mock(return_value="ready")
+        before = self.path.read_text()
+        with patch.object(plugin, "managed_request", return_value={"Rewards": ["reward"]}):
+            with self.assertRaisesRegex(ValueError, "вложения"):
+                self.auto.guarded_delivery(self.event, self.ref, self.auto.data[self.ref])
+        self.assertEqual(self.path.read_text(), before)
+        self.assertEqual(self.auto.data[self.ref]["orders"], {})
+        self.crd.send_message.assert_not_called()
 
     def test_uncertain_send_stays_reserved_across_restart(self):
         self.auto.check = Mock(return_value="ready")
