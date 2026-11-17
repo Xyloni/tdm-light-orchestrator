@@ -6,7 +6,7 @@ import tempfile
 from threading import RLock
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 import sys
 
 import tdm_lot_preview as plugin
@@ -93,29 +93,118 @@ class ManagedLotsTest(unittest.TestCase):
         self.crd.send_message.assert_called_once_with(77, "second:fixture", "buyer", attempts=1, watermark=False)
         self.assertTrue(self.auto.data[self.ref]["orders"]["ORDER"]["sent"])
 
-    def test_long_cardinal_template_delivers_stock_and_all_instructions(self):
+    def test_cardinal_delivery_preserves_the_three_template_sections(self):
+        sections = [
+            "💛 Thank you, $username!\n\n📦 Order $order_id\n🎮 Item\n📅 Date\n\n✅ Paid\n\n"
+            "🔑 Account details\n\n$product\n\n🌐 Sign in\n\n1. Sign out\n2. Sign in\n3. Continue",
+            "🎁 Claim rewards\n\n1. Visit the game site\nhttps://example.invalid/game\n\n"
+            "2. Sign in\n\n3. Link the account\n\n4. Open the inventory\nhttps://example.invalid/inventory\n\n"
+            "5. Find the rewards\n\n6. Claim each reward\n\n7. Launch the game",
+            "⚠️ Important\n\n🟡 Ready to claim\n🟢 Claimed\n\nDeadline\n\nAccount linking\n\n"
+            "Check the game\n\n━━━━━\n\nContact support\n\nLeave feedback\n\n"
+            "Order: $order_link\n\nThank you!",
+        ]
+        self.crd.AD_CFG["Example lot"]["response"] = "\n\n$new\n$sleep=1.5\n\n".join(sections)
+        self.crd.parse_message_entities = cardinal_message_entities
+        self.tools.format_order_text = lambda text, order: text.replace("$username", order.buyer_username).replace(
+            "$order_link", "https://example.invalid/orders/ORDER").replace("$order_id", order.id)
+        self.auto.check = Mock(return_value="ready")
+        observed = []
+
+        def send(chat, text, buyer, **kwargs):
+            observed.append(text)
+            return [SimpleNamespace(id=12 + len(observed), author_id=12, text=text.replace("[a][/a]", ""))]
+
+        self.crd.send_message.side_effect = send
+        with (patch.object(plugin, "managed_request", return_value={"Rewards": ["reward"]}),
+              patch.object(plugin.time, "sleep", side_effect=observed.append)):
+            self.auto.guarded_delivery(self.event, self.ref, self.auto.data[self.ref])
+        rendered = [self.tools.format_order_text(section, self.event.order).replace("$product", "first:fixture")
+                    for section in sections]
+        expected = [cardinal_message_entities(section)[0] for section in rendered]
+        self.assertEqual(observed, [expected[0], 1.5, expected[1], 1.5, expected[2]])
+        self.assertEqual(self.crd.send_message.call_count, 3)
+        self.assertEqual(self.path.read_text(), "second:fixture")
+        self.assertTrue(self.auto.data[self.ref]["orders"]["ORDER"]["sent"])
+
+    def test_long_cardinal_template_preserves_native_twenty_line_chunks(self):
         instructions = [f"Step {number}. Read this instruction." for number in range(1, 24)]
-        self.crd.AD_CFG["Example lot"]["response"] = (
-            "Thank you, $username!\n\n$product\n\n$new\n$sleep=1.5\n\nInstructions\n\n"
-            + "\n\n".join(instructions) + "\n$new\n$sleep=1.5\n\nOrder link: $order_link"
-        )
+        sections = ["Thank you, $username!\n\nOrder details\n\n$product",
+                    "Instructions\n\n" + "\n\n".join(instructions), "Order link: $order_link"]
+        self.crd.AD_CFG["Example lot"]["response"] = "\n\n$new\n$sleep=1.5\n\n".join(sections)
         self.crd.parse_message_entities = cardinal_message_entities
         self.tools.format_order_text = lambda text, order: text.replace("$username", order.buyer_username).replace(
             "$order_link", "https://example.invalid/orders/ORDER")
         self.auto.check = Mock(return_value="ready")
-        with patch.object(plugin, "managed_request", return_value={"Rewards": ["reward"]}):
+        sent = []
+        observed = []
+
+        def send(chat, text, buyer, **kwargs):
+            parsed = cardinal_message_entities(text)
+            self.assertEqual(parsed, [text])
+            sent.append(text)
+            observed.append(text)
+            return [SimpleNamespace(id=12 + len(sent), author_id=12, text=text)]
+
+        self.crd.send_message.side_effect = send
+        with (patch.object(plugin, "managed_request", return_value={"Rewards": ["reward"]}),
+              patch.object(plugin.time, "sleep", side_effect=observed.append)):
             self.auto.guarded_delivery(self.event, self.ref, self.auto.data[self.ref])
             self.auto.guarded_delivery(self.event, self.ref, self.auto.data[self.ref])
-        self.crd.send_message.assert_called_once()
-        text = self.crd.send_message.call_args.args[1]
-        self.assertEqual(cardinal_message_entities(text), [text])
-        self.assertIn("Thank you, buyer!", text)
-        self.assertIn("first:fixture", text.splitlines())
-        self.assertIn("https://example.invalid/orders/ORDER", text)
+        expected = cardinal_message_entities(
+            self.tools.format_order_text("\n$new\n$sleep=1.5\n".join(sections), self.event.order).replace(
+                "$product", "first:fixture")
+        )
+        self.assertEqual(observed, expected)
+        self.assertEqual(self.crd.send_message.call_args_list,
+                         [call(77, text, "buyer", attempts=1, watermark=False) for text in sent])
+        self.assertEqual(len(sent), 5)
+        self.assertIn("Thank you, buyer!\n[a][/a]\nOrder details\n[a][/a]\nfirst:fixture", sent[0])
+        self.assertIn("https://example.invalid/orders/ORDER", sent[-1])
         for instruction in instructions:
-            self.assertIn(instruction, text)
+            self.assertIn(instruction, "\n".join(sent))
         self.assertEqual(self.path.read_text(), "second:fixture")
         self.assertTrue(self.auto.data[self.ref]["orders"]["ORDER"]["sent"])
+
+    def test_restart_resumes_only_unsent_parts_after_uncertain_message_is_found(self):
+        self.crd.AD_CFG["Example lot"]["response"] = "$product\n$new\nInstructions\n$new\nThank you!"
+        self.crd.parse_message_entities = cardinal_message_entities
+        self.auto.check = Mock(return_value="ready")
+        self.crd.send_message.side_effect = [
+            [SimpleNamespace(id=13, author_id=12, text="first:fixture")],
+            [],
+            [SimpleNamespace(id=15, author_id=12, text="Thank you!")],
+        ]
+        with patch.object(plugin, "managed_request", return_value={"Rewards": ["reward"]}):
+            with self.assertRaisesRegex(ValueError, "не подтверждена"):
+                self.auto.guarded_delivery(self.event, self.ref, self.auto.data[self.ref])
+            restored = plugin.LotAutomation(self.crd, self.tools, self.state)
+            lot = restored.data[self.ref]
+            order = lot["orders"]["ORDER"]
+            self.assertEqual(order["stage"], "attempted")
+            self.assertFalse(order["sent"])
+            self.assertEqual(order["last_message"], 13)
+            self.assertNotIn("first:fixture", self.state.read_text(encoding="utf-8"))
+            self.assertEqual(restored.blocked_logins(lot), {"first"})
+            self.assertEqual(self.path.read_text(), "second:fixture")
+            self.crd.account.get_chat_history.return_value = [
+                SimpleNamespace(id=13, author_id=12, text="Instructions"),
+                SimpleNamespace(id=14, author_id=77, text="Instructions"),
+            ]
+            restored.recover_reserved(self.ref, lot, "ORDER", order)
+            self.assertEqual(self.crd.send_message.call_count, 2)
+            self.assertFalse(restored.data[self.ref]["orders"]["ORDER"]["sent"])
+            self.crd.account.get_chat_history.return_value = [
+                SimpleNamespace(id=14, author_id=12, text="Instructions"),
+            ]
+            restored.recover_reserved(self.ref, lot, "ORDER", order)
+        self.assertEqual(self.crd.send_message.call_args_list, [
+            call(77, "first:fixture", "buyer", attempts=1, watermark=False),
+            call(77, "Instructions", "buyer", attempts=1, watermark=False),
+            call(77, "Thank you!", "buyer", attempts=1, watermark=False),
+        ])
+        self.assertEqual(restored.data[self.ref]["orders"]["ORDER"]["message_id"], 15)
+        self.assertEqual(self.path.read_text(), "second:fixture")
 
     def test_delivery_template_attachment_leaves_stock_and_reservation_untouched(self):
         self.crd.AD_CFG["Example lot"]["response"] = "Instructions\n$photo=25\n$product"
@@ -173,6 +262,31 @@ class ManagedLotsTest(unittest.TestCase):
         self.crd.send_message.assert_not_called()
         self.assertEqual(self.path.read_text(), "first:fixture\nsecond:fixture\n")
         self.assertFalse(self.auto.data[self.ref]["orders"])
+
+    def test_refund_after_product_message_keeps_stock_out_and_stops_the_remaining_send(self):
+        self.crd.AD_CFG["Example lot"]["response"] = "$product\n$new\nInstructions"
+        self.crd.parse_message_entities = cardinal_message_entities
+        self.auto.check = Mock(return_value="ready")
+        refunded = SimpleNamespace(**vars(self.event.order))
+        refunded.status = SimpleNamespace(name="REFUNDED")
+
+        def send(chat, text, buyer, **kwargs):
+            self.crd.account.get_order.return_value = refunded
+            return [SimpleNamespace(id=13, author_id=12, text=text)]
+
+        self.crd.send_message.side_effect = send
+        with patch.object(plugin, "managed_request", return_value={"Rewards": ["reward"]}):
+            with self.assertRaisesRegex(ValueError, "оплачен"):
+                self.auto.guarded_delivery(self.event, self.ref, self.auto.data[self.ref])
+            restored = plugin.LotAutomation(self.crd, self.tools, self.state)
+            lot = restored.data[self.ref]
+            order = lot["orders"]["ORDER"]
+            self.assertEqual(order["stage"], "sending")
+            with self.assertRaisesRegex(ValueError, "оплачен"):
+                restored.recover_reserved(self.ref, lot, "ORDER", order)
+        self.crd.send_message.assert_called_once_with(77, "first:fixture", "buyer", attempts=1, watermark=False)
+        self.assertFalse(restored.data[self.ref]["orders"]["ORDER"]["sent"])
+        self.assertEqual(self.path.read_text(), "second:fixture")
 
     def test_chat_reconciliation_requires_real_message_and_does_not_send_twice(self):
         self.auto.check = Mock(return_value="ready")

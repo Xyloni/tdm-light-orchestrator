@@ -7,6 +7,7 @@ import hashlib
 import html
 import http.client
 import io
+import math
 import socket
 import os
 import stat
@@ -19,7 +20,7 @@ from threading import BoundedSemaphore, Lock, RLock, Thread, local
 from urllib import error, parse, request
 
 NAME = "TDM Drops lots"
-VERSION = "0.4.7"
+VERSION = "0.4.8"
 DESCRIPTION = "Checks Twitch Drops, guards Cardinal delivery and retires configured lots."
 CREDITS = "TDM Light Orchestrator"
 UUID = "b66cfbb9-9fe6-40e1-b9da-cf1d0e326542"
@@ -35,6 +36,7 @@ DEADLINE = re.compile(r"\[\s*до\s+(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?\s*\]", re
 MSK = dt.timezone(dt.timedelta(hours=3))
 SCAN_INTERVAL = 900
 NATIVE_FLAGS = ("disable", "disableAutoRestore", "disableAutoDisable")
+DELIVERY_COMMAND_LINE = re.compile(r"(^[ \t]*\$(?:new|sleep=\d+(?:\.\d+)?)[ \t]*$)", re.MULTILINE)
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -403,6 +405,14 @@ def delivery_text_hash(text):
     if not isinstance(text, str) or not text.strip():
         return None
     return sold_key(text.replace("\r\n", "\n").strip())
+
+
+def rendered_delivery_hash(text):
+    if not isinstance(text, str):
+        return None
+    # FunPay may render Cardinal's blank-line markup as an empty line.
+    lines = text.replace("\r\n", "\n").split("\n")
+    return delivery_text_hash("\n".join("" if line.strip() in ("", "[a][/a]") else line for line in lines))
 
 
 def stock_identity(path):
@@ -1082,30 +1092,31 @@ class LotAutomation:
                                         f"♻️ Лот #{lot['id']} · в свободный пул возвращено {len(returned)}. Ожидают проверки: {len(pending)}.",
                                         pending=pending, retirement_confirmed=sorted(confirmed), returned=total)
 
-    def delivery_message(self, template, order, rows):
+    def delivery_messages(self, template, order, rows):
         if "$product" not in template:
             raise ValueError("В сообщении автовыдачи отсутствует $product.")
-        sections = re.sub(r"\$sleep=\d+(?:\.\d+)?", "", template).split("$new")
-        stock = stock_text(rows)
-        text = self.tools.format_order_text("\n".join(sections), order).replace("$product", stock)
-        text = "\n".join(line for line in text.split("\n") if line.strip())
-        if len(text.split("\n")) > 20 or len(text) > 3500:
-            # Fold only the template prose. Keep each product row on its own line.
-            compact = ["\n$product\n".join(" ".join(part.split()) for part in section.split("$product"))
-                       for section in sections]
-            text = self.tools.format_order_text("\n".join(compact), order).replace("$product", stock)
-            text = "\n".join(line for line in text.split("\n") if line.strip())
-        if len(text) > 3500:
-            raise ValueError("Шаблон с товаром превышает 3500 символов. Сократите текст выдачи.")
-        entities = self.cardinal.parse_message_entities(text)
-        if any(not isinstance(entity, str) for entity in entities):
-            raise ValueError("Шаблон выдачи поддерживает текст. Перенесите вложения в отдельное сообщение.")
-        if len(entities) != 1:
-            raise ValueError("Шаблон с товаром не помещается в одно сообщение. Сократите текст или количество строк.")
-        message = entities[0]
-        if any(line not in message for line in rows.values()):
+        text = self.tools.format_order_text(template, order).replace("$product", stock_text(rows))
+        # Blank lines next to a command separate messages. Keep paragraphs within each message.
+        parts = DELIVERY_COMMAND_LINE.split(text.replace("\r\n", "\n"))
+        text = "\n".join(part.strip() for part in parts if part.strip())
+        messages = []
+        delay = 0
+        for entity in self.cardinal.parse_message_entities(text):
+            if isinstance(entity, float):
+                delay += entity
+                if not math.isfinite(delay):
+                    raise ValueError("Шаблон содержит недопустимую паузу $sleep.")
+                continue
+            if not isinstance(entity, str):
+                raise ValueError("Шаблон выдачи поддерживает текст. Перенесите вложения в отдельное сообщение.")
+            message = entity.strip()
+            if len(message) > 3500:
+                raise ValueError("Шаблон содержит сообщение длиннее 3500 символов. Разделите его через $new.")
+            messages.append((delay, message))
+            delay = 0
+        if any(not any(line in message for _, message in messages) for line in rows.values()):
             raise ValueError("Шаблон или товар содержит разметку Cardinal, которая меняет строку товара.")
-        return message
+        return messages
 
     def guarded_delivery(self, event, ref, lot):
         from handlers import deliver_product_handler
@@ -1159,14 +1170,12 @@ class LotAutomation:
             raise ValueError("Свежая проверка не подтвердила достаточно аккаунтов. Товар остался в TXT.")
         if bundle != managed_request(ref):
             raise ValueError("Состав лота изменился во время проверки.")
-        # One outbound message prevents a partially sent order from being
-        # mistaken for a complete delivery or returned to stock.
-        text = self.delivery_message(section["response"], event.order, selected)
+        messages = self.delivery_messages(section["response"], event.order, selected)
         with self.funpay_lock:
             lot = self.refresh_offer(ref)
+            self.require_clear_delivery_chat(event.order.buyer_id, ref, order_id)
             chat = self.cardinal.account.get_chat_by_name(event.order.buyer_username)
             chat_id = chat.id if chat else event.order.chat_id
-            history = self.cardinal.account.get_chat_history(chat_id, interlocutor_username=event.order.buyer_username)
             self.require_paid_order(event.order)
             with self.lock, locked:
                 current = self.data[ref]
@@ -1185,14 +1194,14 @@ class LotAutomation:
                          "before": stock_digest(rows_now), "after": stock_digest(rest),
                          "before_identity": stock_identity(path), "after_identity": stock_identity(stage),
                          "bundle_hash": bundle_digest(bundle),
-                         "text": text, "chat": chat_id, "buyer": event.order.buyer_username,
+                         "messages": messages, "chat": chat_id, "buyer": event.order.buyer_username,
                          "buyer_id": event.order.buyer_id, "amount": event.order.amount or 1,
-                         "last_message": max((message.id for message in history), default=0)}
+                         "last_message": 0}
                 self.save_order(ref, order_id, order)
                 self.detach_order_stock(ref, lot, path, order_id, order, rows_now)
             self.send_reserved(ref, order_id)
         event.delivered = True
-        event.delivery_text = text
+        event.delivery_text = "\n\n".join(text for _, text in messages)
         event.goods_delivered = amount
         event.goods_left = len(rows_now) - amount
 
@@ -1201,6 +1210,14 @@ class LotAutomation:
         if (fresh.id != expected.id or order_state(fresh) != "PAID" or fresh.buyer_id != expected.buyer_id
                 or fresh.buyer_username != expected.buyer_username or (fresh.amount or 1) != (expected.amount or 1)):
             raise ValueError("FunPay не подтвердил, что заказ всё ещё оплачен. Выдача остановлена.")
+
+    def require_clear_delivery_chat(self, buyer_id, ref, order_id):
+        # A later order can send identical instructions and obscure an unresolved attempt.
+        for lot_ref, lot in self.data.items():
+            for stored_id, stored in lot["orders"].items():
+                if ((lot_ref, stored_id) != (ref, order_id) and stored.get("stage") == "attempted"
+                        and stored.get("buyer_id") == buyer_id):
+                    raise ValueError("Выдача не подтверждена по другому заказу в этом чате. Сначала нужна сверка.")
 
     def remember_order_attention(self, ref, order_id, error):
         if order_id == "ADTEST" or not isinstance(order_id, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,24}", order_id):
@@ -1234,7 +1251,9 @@ class LotAutomation:
         if record.get("reason") == "stock_changed":
             return "Изменился TXT или состав лота."
         if order.get("stage") == "attempted":
-            return "Ждём подтверждение отправки в чате."
+            return "Ждём подтверждение отправки сообщения в чате FunPay."
+        if order.get("stage") == "sending":
+            return "Часть сообщений отправлена. Выдача ещё не завершена."
         if record.get("reason") == "check":
             return "Свежая проверка не подтвердила награды на зарезервированном аккаунте."
         if order.get("stage") in ("reserved", "prepared"):
@@ -1290,8 +1309,9 @@ class LotAutomation:
                 payment = None
             summary = payment_status_text(payment)
             if order.get("stage") == "attempted":
-                self.recover_reserved(ref, lot, order_id, order)
-                if self.data[ref]["orders"][order_id]["sent"]:
+                self.recover_reserved(ref, lot, order_id, order, resume=False)
+                order = self.data[ref]["orders"][order_id]
+                if order["sent"]:
                     return f"{summary}\n✅ Отправка подтверждена по чату FunPay."
             with self.lock:
                 records = dict(self.data[ref].get("order_attention", {}))
@@ -1351,39 +1371,73 @@ class LotAutomation:
         from types import SimpleNamespace
 
         current = self.data[ref]["orders"][order_id]
-        if current.get("stage") != "prepared":
+        if current.get("stage") not in ("prepared", "sending"):
             return
         if bundle_digest(managed_request(ref)) != current["bundle_hash"]:
             raise ValueError("Состав лота изменился после резервирования заказа.")
-        self.require_paid_order(SimpleNamespace(id=order_id, buyer_id=current["buyer_id"],
-                                                buyer_username=current["buyer"], amount=current["amount"]))
-        # Once a send begins, resolve ambiguities against chat history. Repeating it
-        # after a transport error can disclose the same credentials a second time.
-        attempted = dict(current, stage="attempted", text_hash=delivery_text_hash(current["text"]))
-        attempted.pop("rows")
-        attempted.pop("text")
-        self.save_order(ref, order_id, attempted)
-        result = self.cardinal.send_message(current["chat"], current["text"], current["buyer"],
-                                            attempts=1, watermark=False)
-        if result and len(result) == 1 and self.matches_delivery_message(attempted, result[0]):
-            self.confirm_delivery(ref, order_id, attempted, result[0].id)
+        self.require_clear_delivery_chat(current["buyer_id"], ref, order_id)
+        expected = SimpleNamespace(id=order_id, buyer_id=current["buyer_id"],
+                                   buyer_username=current["buyer"], amount=current["amount"])
+        messages = current["messages"] if "messages" in current else [(0, current["text"])]
+        for index, (delay, text) in enumerate(messages):
+            if delay:
+                time.sleep(delay)
+            history = self.cardinal.account.get_chat_history(current["chat"], interlocutor_username=current["buyer"])
+            last_message = max(current["last_message"], max((message.id for message in history), default=0))
+            self.require_paid_order(expected)
+            pending = messages[index + 1:]
+            # Persist the attempt before sending and keep plaintext only for unsent parts.
+            attempted = dict(current, stage="attempted", last_message=last_message,
+                             text_hash=delivery_text_hash(text), rendered_text_hash=rendered_delivery_hash(text),
+                             messages=pending)
+            attempted.pop("text", None)
+            rows = attempted.pop("rows", {})
+            pending_rows = {login: line for login, line in rows.items()
+                            if any(line in message for _, message in pending)}
+            if pending_rows:
+                attempted["rows"] = pending_rows
+            self.save_order(ref, order_id, attempted)
+            result = self.cardinal.send_message(current["chat"], text, current["buyer"], attempts=1, watermark=False)
+            if not result or len(result) != 1 or not self.matches_delivery_message(attempted, result[0]):
+                raise ValueError("Выдача не подтверждена. Плагин сверит чат FunPay, резерв пока сохранён.")
+            current = self.confirm_delivery_part(ref, order_id, attempted, result[0].id)
+
+    def confirm_delivery_part(self, ref, order_id, order, message_id):
+        if not order.get("messages"):
+            self.confirm_delivery(ref, order_id, order, message_id)
             return
-        raise ValueError("Выдача не подтверждена. Плагин сверит чат FunPay, резерв пока сохранён.")
+        current = dict(order, stage="sending", last_message=message_id)
+        current.pop("text_hash")
+        current.pop("rendered_text_hash", None)
+        self.save_order(ref, order_id, current)
+        return current
 
     def matches_delivery_message(self, order, message):
         number = getattr(message, "id", 0)
+        text = getattr(message, "text", None)
+        rendered_hash = order.get("rendered_text_hash")
         return (isinstance(number, int) and number > order["last_message"]
                 and getattr(message, "author_id", None) == self.cardinal.account.id
-                and delivery_text_hash(getattr(message, "text", None)) == order["text_hash"])
+                and (delivery_text_hash(text) == order["text_hash"]
+                     or (rendered_hash is not None and rendered_delivery_hash(text) == rendered_hash)))
 
-    def recover_reserved(self, ref, lot, order_id, order):
+    def recover_reserved(self, ref, lot, order_id, order, *, resume=True):
         stage = order.get("stage")
         if stage == "attempted":
             history = self.cardinal.account.get_chat_history(order["chat"], interlocutor_username=order["buyer"],
                                                              from_id=order["last_message"] + 1)
             match = next((message for message in history if self.matches_delivery_message(order, message)), None)
-            if match is not None:
-                self.confirm_delivery(ref, order_id, order, match.id)
+            if match is None:
+                return
+            order = self.confirm_delivery_part(ref, order_id, order, match.id)
+            if order is None or not resume:
+                return
+            stage = order["stage"]
+        if stage == "sending":
+            if lot["retired"] and order.get("rows"):
+                return
+            self.check_reserved_rewards(ref, lot, order.get("rows", {}))
+            self.send_reserved(ref, order_id)
             return
         if stage not in ("reserved", "prepared"):
             return  # Older reservations contain no trustworthy send evidence.
@@ -1392,9 +1446,7 @@ class LotAutomation:
                 or fresh.buyer_username != order["buyer"] or (fresh.amount or 1) != order["amount"]):
             raise ValueError("Данные заказа в FunPay изменились.")
         if order_state(fresh) == "PAID" and not lot["retired"]:
-            for login, line in order["rows"].items():
-                if self.check(ref, lot, login, line, foreground=True) != "ready":
-                    raise ValueError("Свежая проверка не подтвердила ранее зарезервированный аккаунт.")
+            self.check_reserved_rewards(ref, lot, order["rows"])
         path, locked = self.product_file(lot)
         with self.lock, locked:
             rows = product_rows(path, lot["format"])
@@ -1418,6 +1470,11 @@ class LotAutomation:
             elif set(rows).intersection(order["logins"]):
                 raise ValueError("Ранее зарезервированный аккаунт снова появился в TXT.")
         self.send_reserved(ref, order_id)
+
+    def check_reserved_rewards(self, ref, lot, rows):
+        for login, line in rows.items():
+            if self.check(ref, lot, login, line, foreground=True) != "ready":
+                raise ValueError("Свежая проверка не подтвердила ранее зарезервированный аккаунт.")
 
     def recover_orders(self, ref, lot):
         now = time.monotonic()
