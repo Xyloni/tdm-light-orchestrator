@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -114,11 +115,14 @@ func (s *scheduler) saveManagedLotInput(kind, text string) error {
 }
 
 func (s *scheduler) saveLotBundleLocked(ref string, campaigns []string) error {
+	return s.saveLotBundleFromCatalogLocked(ref, campaigns, s.lotCatalogFor(ref), nil)
+}
+
+func (s *scheduler) saveLotBundleFromCatalogLocked(ref string, campaigns []string, catalog, discovered map[string]lotCatalogCampaign) error {
 	if len(campaigns) < 1 || len(campaigns) > 20 || !validLotRef(ref) {
 		return fmt.Errorf("укажите код лота и от 1 до 20 кампаний")
 	}
 	lot := managedLot{Benefits: make(map[string][]string)}
-	catalog := s.lotCatalogFor(ref)
 	allDeadlines := true
 	seen := make(map[string]bool)
 	for _, line := range campaigns {
@@ -180,11 +184,36 @@ func (s *scheduler) saveLotBundleLocked(ref string, campaigns []string) error {
 		s.state.ManagedLots = make(map[string]managedLot)
 	}
 	prior, exists := s.state.ManagedLots[ref]
+	previousCatalog := s.state.LotCatalog
+	known := s.lotCatalogFor(ref)
+	var updatedCatalog map[string]lotCatalogCampaign
+	for id := range seen {
+		item, found := discovered[id]
+		if !found {
+			continue
+		}
+		if previous, exists := known[id]; exists {
+			var changed bool
+			item, changed = mergeLotInventoryCampaign(previous, item)
+			if !changed {
+				continue
+			}
+		}
+		if updatedCatalog == nil {
+			updatedCatalog = make(map[string]lotCatalogCampaign, len(previousCatalog)+len(seen))
+			maps.Copy(updatedCatalog, previousCatalog)
+		}
+		updatedCatalog[id] = item
+	}
+	if updatedCatalog != nil {
+		s.state.LotCatalog = updatedCatalog
+	}
 	s.state.ManagedLots[ref] = lot
 	if s.persist() {
 		s.refreshLotClaimPolicies(previousPolicies)
 		return nil
 	}
+	s.state.LotCatalog = previousCatalog
 	if exists {
 		s.state.ManagedLots[ref] = prior
 	} else {
@@ -205,10 +234,41 @@ func validLotID(id string) bool {
 	return id != "" && len(id) <= 100 && !strings.ContainsAny(id, " \t\r\n/|")
 }
 
+var lotCampaignUUID = regexp.MustCompile(`(?i)^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$`)
+
+func normalizeLotCampaignQuery(input string) (string, bool) {
+	query := strings.TrimSpace(input)
+	if strings.Contains(query, "://") {
+		link, err := url.Parse(query)
+		if err != nil || link.Scheme != "https" || link.User != nil ||
+			(!strings.EqualFold(link.Host, "www.twitch.tv") && !strings.EqualFold(link.Host, "twitch.tv")) ||
+			strings.TrimSuffix(link.Path, "/") != "/drops/campaigns" {
+			return "", false
+		}
+		ids := link.Query()["dropID"]
+		if len(ids) != 1 || !lotCampaignUUID.MatchString(ids[0]) {
+			return "", false
+		}
+		query = ids[0]
+	}
+	if lotCampaignUUID.MatchString(query) {
+		query = strings.ToLower(query)
+	}
+	return query, validLotLabel(query)
+}
+
+func lotCampaignMatches(query, id, game, name string) bool {
+	if lotCampaignUUID.MatchString(query) {
+		return strings.EqualFold(id, query)
+	}
+	query = strings.ToLower(query)
+	return query != "" && (strings.Contains(strings.ToLower(game), query) || strings.Contains(strings.ToLower(name), query))
+}
+
 func (s *scheduler) discoverLotCampaigns(query, login string) (int, error) {
-	query = strings.TrimSpace(query)
-	if !validLotLabel(query) {
-		return 0, fmt.Errorf("укажите название игры или кампании")
+	query, valid := normalizeLotCampaignQuery(query)
+	if !valid {
+		return 0, fmt.Errorf("укажите название игры, кампании или ссылку Twitch Drops")
 	}
 	login = strings.ToLower(strings.TrimSpace(login))
 	s.mu.Lock()
@@ -264,23 +324,42 @@ func (s *scheduler) discoverLotCampaigns(query, login string) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	var remote []twitch.LotCampaign
-	var err error
+	answered := false
 	for _, account := range accounts {
 		gql := twitch.NewGQLClient(client, &cfg, &account)
+		var found []twitch.LotCampaign
+		var err error
 		if login == "" {
-			remote, err = gql.LotCampaigns(ctx)
+			if lotCampaignUUID.MatchString(query) {
+				campaign, lookupErr := gql.LotCampaignByID(ctx, query)
+				answered = answered || lookupErr == nil
+				if campaign != nil && len(campaign.TimeBasedDrops) > 0 {
+					remote = []twitch.LotCampaign{*campaign}
+					break
+				}
+			}
+			found, err = gql.LotCampaigns(ctx)
 		} else {
-			remote, err = gql.LotCampaignsInInventory(ctx)
+			found, err = gql.LotCampaignsInInventory(ctx)
 		}
-		if err == nil || ctx.Err() != nil {
+		if err == nil {
+			answered = true
+			if login != "" || slices.ContainsFunc(found, func(c twitch.LotCampaign) bool {
+				return len(c.TimeBasedDrops) > 0 && lotCampaignMatches(query, c.ID, c.Game.Name, c.Name)
+			}) {
+				remote = found
+				break
+			}
+		}
+		if ctx.Err() != nil {
 			break
 		}
 	}
-	if err != nil && login != "" {
+	if !answered && login != "" {
 		return 0, fmt.Errorf("Twitch не подтвердил инвентарь аккаунта. Проверьте его авторизацию и повторите поиск")
 	}
 	added, saveErr := s.importLotCampaigns(query, append(remote, history...), login != "")
-	if err != nil && saveErr == nil && added == 0 {
+	if !answered && len(accounts) > 0 && saveErr == nil && added == 0 {
 		return 0, fmt.Errorf("Twitch не подтвердил каталог. Проверьте сохранённые кампании или поищите в инвентаре аккаунта")
 	}
 	return added, saveErr
@@ -288,7 +367,9 @@ func (s *scheduler) discoverLotCampaigns(query, login string) (int, error) {
 
 func (s *scheduler) importLotCampaigns(query string, campaigns []twitch.LotCampaign, inventoryOnly bool) (int, error) {
 	query = strings.ToLower(query)
-	exactGame := slices.ContainsFunc(campaigns, func(c twitch.LotCampaign) bool { return strings.EqualFold(c.Game.Name, query) })
+	exactGame := !lotCampaignUUID.MatchString(query) && slices.ContainsFunc(campaigns, func(c twitch.LotCampaign) bool {
+		return len(c.TimeBasedDrops) > 0 && strings.EqualFold(c.Game.Name, query)
+	})
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous := s.state.LotCatalog
@@ -299,7 +380,7 @@ func (s *scheduler) importLotCampaigns(query string, campaigns []twitch.LotCampa
 	updated := make(map[string]bool)
 	for _, campaign := range campaigns {
 		name := strings.ToLower(campaign.Game.Name)
-		matches := strings.Contains(name, query) || strings.Contains(strings.ToLower(campaign.Name), query)
+		matches := lotCampaignMatches(query, campaign.ID, campaign.Game.Name, campaign.Name)
 		if name == "" || campaign.Name == "" || (exactGame && name != query) || !matches || !validLotID(campaign.ID) || len(campaign.TimeBasedDrops) == 0 {
 			continue
 		}
@@ -307,42 +388,16 @@ func (s *scheduler) importLotCampaigns(query string, campaigns []twitch.LotCampa
 		if exists && (!existing.InventoryOnly || !strings.EqualFold(existing.Game, campaign.Game.Name)) {
 			continue
 		}
-		item := lotCatalogCampaign{Game: campaign.Game.Name, Name: campaign.Name, Benefits: make(map[string][]string), InventoryOnly: inventoryOnly}
-		seen := make(map[string]bool)
-		for _, drop := range campaign.TimeBasedDrops {
-			if !validLotID(drop.ID) || drop.Name == "" || seen[drop.ID] {
-				continue
-			}
-			seen[drop.ID] = true
-			item.Rewards = append(item.Rewards, lotReward{Campaign: campaign.ID, ID: drop.ID, Name: drop.Name})
-			for _, edge := range drop.BenefitEdges {
-				if validLotID(edge.Benefit.ID) {
-					item.Benefits[drop.ID] = append(item.Benefits[drop.ID], edge.Benefit.ID)
-				}
-			}
-		}
-		if len(item.Rewards) == 0 {
+		item, ok := lotCampaignFromTwitch(campaign, inventoryOnly)
+		if !ok {
 			continue
 		}
 		if exists && inventoryOnly {
-			merged := existing
-			merged.Rewards = slices.Clone(existing.Rewards)
-			merged.Benefits = maps.Clone(existing.Benefits)
-			if merged.Benefits == nil {
-				merged.Benefits = make(map[string][]string)
-			}
-			for _, reward := range item.Rewards {
-				if !slices.ContainsFunc(merged.Rewards, func(r lotReward) bool { return r.ID == reward.ID }) {
-					merged.Rewards = append(merged.Rewards, reward)
-				}
-				if len(merged.Benefits[reward.ID]) == 0 && len(item.Benefits[reward.ID]) > 0 {
-					merged.Benefits[reward.ID] = item.Benefits[reward.ID]
-				}
-			}
-			if len(merged.Rewards) == len(existing.Rewards) && len(merged.Benefits) == len(existing.Benefits) {
+			var changed bool
+			item, changed = mergeLotInventoryCampaign(existing, item)
+			if !changed {
 				continue
 			}
-			item = merged
 		}
 		catalog[campaign.ID] = item
 		updated[campaign.ID] = true
@@ -356,4 +411,47 @@ func (s *scheduler) importLotCampaigns(query string, campaigns []twitch.LotCampa
 	}
 	s.state.LotCatalog = previous
 	return 0, fmt.Errorf("не удалось сохранить каталог")
+}
+
+func mergeLotInventoryCampaign(existing, discovered lotCatalogCampaign) (lotCatalogCampaign, bool) {
+	if !existing.InventoryOnly || !strings.EqualFold(existing.Game, discovered.Game) {
+		return existing, false
+	}
+	merged := existing
+	merged.Rewards = slices.Clone(existing.Rewards)
+	merged.Benefits = make(map[string][]string, len(existing.Benefits))
+	maps.Copy(merged.Benefits, existing.Benefits)
+	changed := false
+	for _, reward := range discovered.Rewards {
+		if !slices.ContainsFunc(merged.Rewards, func(r lotReward) bool { return r.ID == reward.ID }) {
+			merged.Rewards = append(merged.Rewards, reward)
+			changed = true
+		}
+		if len(merged.Benefits[reward.ID]) == 0 && len(discovered.Benefits[reward.ID]) > 0 {
+			merged.Benefits[reward.ID] = discovered.Benefits[reward.ID]
+			changed = true
+		}
+	}
+	return merged, changed
+}
+
+func lotCampaignFromTwitch(campaign twitch.LotCampaign, inventoryOnly bool) (lotCatalogCampaign, bool) {
+	if campaign.Game.Name == "" || campaign.Name == "" || !validLotID(campaign.ID) {
+		return lotCatalogCampaign{}, false
+	}
+	item := lotCatalogCampaign{Game: campaign.Game.Name, Name: campaign.Name, Benefits: make(map[string][]string), InventoryOnly: inventoryOnly}
+	seen := make(map[string]bool)
+	for _, drop := range campaign.TimeBasedDrops {
+		if !validLotID(drop.ID) || drop.Name == "" || seen[drop.ID] {
+			continue
+		}
+		seen[drop.ID] = true
+		item.Rewards = append(item.Rewards, lotReward{Campaign: campaign.ID, ID: drop.ID, Name: drop.Name})
+		for _, edge := range drop.BenefitEdges {
+			if validLotID(edge.Benefit.ID) {
+				item.Benefits[drop.ID] = append(item.Benefits[drop.ID], edge.Benefit.ID)
+			}
+		}
+	}
+	return item, len(item.Rewards) > 0
 }

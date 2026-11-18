@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -152,5 +153,77 @@ func TestTelegramLotSearchOpensRewardsFromRegisteredDeepLink(t *testing.T) {
 	rewards = s.telegramMenu(catalogAction(t, rewards, "Выбрать все награды"))
 	if !strings.Contains(rewards.Text, "Черновик · выбрано 1") || len(s.state.ManagedLots) != 0 {
 		t.Fatalf("selection should update only the draft: %+v", rewards)
+	}
+}
+
+func TestTelegramLotSearchFindsExactTwitchCampaignLink(t *testing.T) {
+	now := time.Now()
+	s := testScheduler(t, now)
+	const (
+		ref    = "0123456789abcdef01234567"
+		target = "df576175-0f22-467e-8ba7-955603a16567"
+		other  = "5ce10491-2607-4cfe-a3cd-30b36e8a76ac"
+		game   = "Borderlands 4"
+		name   = "Borderlands 4 x The Hunt"
+		link   = "https://www.twitch.tv/drops/campaigns?dropID=" + target
+	)
+	if err := s.registerLotTitle(ref, "Borderlands 4 lot", []lotSampleAccount{{Login: "login_only"}}); err != nil {
+		t.Fatal(err)
+	}
+	s.state.Games["borderlands 4"] = &gameState{Name: game, Campaigns: map[string]*campaign{
+		target: {ID: target, Name: name, Ends: now.Add(-time.Hour), Rewards: []rewardRequirement{{ID: "target-drop", Name: "The Horns"}}},
+		other:  {ID: other, Name: name + " Encore", Rewards: []rewardRequirement{{ID: "other-drop", Name: "Other reward"}}},
+	}}
+	editor := s.telegramMenu("lb-start:" + ref)
+	search := s.telegramMenu(catalogAction(t, editor, "Найти кампанию"))
+	s.telegramMenu(search.Input + "\nhttps://example.invalid/drops/campaigns?dropID=" + target)
+	if len(s.state.LotCatalog) != 0 {
+		t.Fatal("campaign was imported from an unrelated URL")
+	}
+	matches := s.telegramMenu(search.Input + "\n" + link)
+	if len(s.state.LotCatalog) != 1 || s.state.LotCatalog[target].Name != name {
+		t.Fatalf("Twitch link didn't import exactly the requested campaign: %+v", s.state.LotCatalog)
+	}
+	rewards := s.telegramMenu(catalogAction(t, matches, "The Hunt"))
+	if !strings.Contains(rewards.Text, "Отмечено наград: 0 из 1") {
+		t.Fatalf("could not open the reward for the Twitch link: %+v", rewards)
+	}
+	delete(s.state.Games, "borderlands 4")
+	matches = s.telegramMenu(search.Input + "\n" + target)
+	catalogAction(t, matches, "The Hunt")
+}
+
+func TestTelegramLotSearchLooksUpTwitchLinkBeforeLotInventory(t *testing.T) {
+	s := testScheduler(t, time.Now())
+	const ref = "0123456789abcdef01234567"
+	const id = "df576175-0f22-467e-8ba7-955603a16567"
+	if err := s.registerLotTitle(ref, "Borderlands 4 lot", []lotSampleAccount{{Login: "login_only"}}); err != nil {
+		t.Fatal(err)
+	}
+	s.state.LotCredentials = map[string]parser.Account{"catalog": {Login: "catalog", OAuth: "oauth-fixture", UserID: "21"}}
+	transport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = transport })
+	var queries int
+	http.DefaultTransport = managedLotDiagnosticTransport(func(r *http.Request) (*http.Response, error) {
+		var request struct {
+			OperationName string
+			Variables     map[string]string
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		queries++
+		if request.OperationName != "TDMManagedLotCampaign" || request.Variables["id"] != id {
+			t.Fatalf("did not look up the campaign directly: %+v", request)
+		}
+		body := `{"data":{"currentUser":{"dropCampaign":{"id":"` + id + `","name":"Borderlands 4 x The Hunt","game":{"name":"Borderlands 4"},"timeBasedDrops":[{"id":"drop","name":"The Horns"}]}}}}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	editor := s.telegramMenu("lb-start:" + ref)
+	search := s.telegramMenu(catalogAction(t, editor, "Найти кампанию"))
+	matches := s.telegramMenu(search.Input + "\nhttps://www.twitch.tv/drops/campaigns?dropID=" + id)
+	catalogAction(t, matches, "The Hunt")
+	if queries != 1 || s.state.LotCatalog[id].InventoryOnly {
+		t.Fatalf("expected one direct catalog query, observed %d", queries)
 	}
 }

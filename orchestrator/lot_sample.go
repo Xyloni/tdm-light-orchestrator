@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xyloni/tdm-light-orchestrator/config"
 	"github.com/xyloni/tdm-light-orchestrator/parser"
 	"github.com/xyloni/tdm-light-orchestrator/twitch"
 )
@@ -63,12 +64,15 @@ func (s *scheduler) storeLotSampleLocked(ref string, sample []lotSampleAccount) 
 	})
 }
 
-func (s *scheduler) hasLotCatalogMatch(query string) bool {
-	query = strings.ToLower(strings.TrimSpace(query))
+func (s *scheduler) hasLotCatalogMatch(query, draftToken string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, item := range s.state.LotCatalog {
-		if strings.Contains(strings.ToLower(item.Game), query) || strings.Contains(strings.ToLower(item.Name), query) {
+	catalog := s.state.LotCatalog
+	if draft := s.lotBundleDraft; draft != nil && draft.Token == draftToken {
+		catalog = s.lotBundleCatalog(draft)
+	}
+	for id, item := range catalog {
+		if lotCampaignMatches(query, id, item.Game, item.Name) {
 			return true
 		}
 	}
@@ -109,34 +113,39 @@ func (s *scheduler) credentialsForLotSample(ref string, sample []lotSampleAccoun
 	return accounts
 }
 
-func (s *scheduler) discoverLotSampleCampaigns(query, draftToken string) (int, error) {
-	query = strings.TrimSpace(query)
-	if !validLotLabel(query) {
-		return 0, fmt.Errorf("укажите название игры или кампании")
-	}
+func (s *scheduler) lotSampleAccounts(draftToken string) (string, []parser.Account, config.Config, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg := s.miner
+	cfg.Diagnostics = false
 	draft := s.lotBundleDraft
 	if draft == nil || draft.Token != draftToken {
-		s.mu.Unlock()
-		return 0, fmt.Errorf("откройте лот заново")
+		return "", nil, cfg, fmt.Errorf("откройте лот заново")
 	}
 	sample := s.lotSamples[draft.Ref]
 	if !time.Now().Before(sample.expires) {
 		delete(s.lotSamples, draft.Ref)
-		s.mu.Unlock()
-		return 0, fmt.Errorf("откройте лот в Cardinal и снова откройте состав в оркестраторе, чтобы обновить выборку из TXT")
+		return "", nil, cfg, fmt.Errorf("откройте лот в Cardinal и снова откройте состав в оркестраторе, чтобы обновить выборку из TXT")
 	}
 	if len(sample.accounts) == 0 {
-		s.mu.Unlock()
-		return 0, fmt.Errorf("в TXT этого лота нет подходящих строк с аккаунтами")
+		return "", nil, cfg, fmt.Errorf("в TXT этого лота нет подходящих строк с аккаунтами")
 	}
 	accounts := s.credentialsForLotSample(draft.Ref, sample.accounts)
-	cfg := s.miner
-	s.mu.Unlock()
 	if len(accounts) == 0 {
-		return 0, fmt.Errorf("для аккаунтов из TXT нужны данные Twitch. Загрузите полный TXT в «Лоты → Дополнительно → Загрузить аккаунты лотов» и повторите поиск")
+		return "", nil, cfg, fmt.Errorf("для аккаунтов из TXT нужны данные Twitch. Загрузите полный TXT в «Лоты → Дополнительно → Загрузить аккаунты лотов» и повторите поиск")
 	}
-	cfg.Diagnostics = false
+	return draft.Ref, accounts, cfg, nil
+}
+
+func (s *scheduler) discoverLotSampleCampaigns(query, draftToken string) (int, error) {
+	query, valid := normalizeLotCampaignQuery(query)
+	if !valid {
+		return 0, fmt.Errorf("укажите название игры, кампании или ссылку Twitch Drops")
+	}
+	_, accounts, cfg, err := s.lotSampleAccounts(draftToken)
+	if err != nil {
+		return 0, err
+	}
 	client := &http.Client{Timeout: 4 * time.Second}
 	defer client.CloseIdleConnections()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -157,4 +166,61 @@ func (s *scheduler) discoverLotSampleCampaigns(query, draftToken string) (int, e
 		return 0, fmt.Errorf("Twitch не подтвердил инвентарь аккаунтов из лота. Проверьте авторизацию и повторите поиск")
 	}
 	return s.importLotCampaigns(query, campaigns, true)
+}
+
+func (s *scheduler) scanLotInventory(draftToken string) (map[string]lotCatalogCampaign, bool, error) {
+	ref, accounts, cfg, err := s.lotSampleAccounts(draftToken)
+	if err != nil {
+		return nil, false, err
+	}
+	client := &http.Client{Timeout: 4 * time.Second}
+	defer client.CloseIdleConnections()
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	for _, account := range accounts {
+		gql := twitch.NewGQLClient(client, &cfg, &account)
+		campaigns, err := gql.LotCampaignsInInventory(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				break
+			}
+			continue
+		}
+		found := make(map[string]lotCatalogCampaign)
+		partial := false
+		for _, campaign := range campaigns {
+			if item, ok := lotCampaignFromTwitch(campaign, true); ok {
+				found[campaign.ID] = item
+			} else {
+				partial = true
+			}
+		}
+		claimed, historyErr := gql.ClaimedLotCampaignIDs(ctx)
+		partial = partial || historyErr != nil
+		s.mu.Lock()
+		known := s.lotCatalogFor(ref)
+		for _, id := range claimed {
+			if item, ok := known[id]; ok && found[id].Game == "" {
+				found[id] = item
+			}
+		}
+		s.mu.Unlock()
+		for _, id := range claimed {
+			if _, ok := found[id]; ok {
+				continue
+			}
+			if validLotID(id) && ctx.Err() == nil {
+				campaign, err := gql.LotCampaignByID(ctx, id)
+				if err == nil && campaign != nil {
+					if item, ok := lotCampaignFromTwitch(*campaign, true); ok {
+						found[campaign.ID] = item
+						continue
+					}
+				}
+			}
+			partial = true
+		}
+		return found, partial, nil
+	}
+	return nil, false, fmt.Errorf("Twitch не подтвердил инвентарь аккаунтов из лота. Проверьте авторизацию и повторите поиск")
 }

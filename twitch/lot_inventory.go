@@ -64,6 +64,56 @@ func (c *GQLClient) LotCampaignsInInventory(ctx context.Context) ([]LotCampaign,
 	return campaigns, nil
 }
 
+func (c *GQLClient) ClaimedLotCampaignIDs(ctx context.Context) ([]string, error) {
+	const query = `query TDMManagedLotClaimedCampaigns {
+		currentUser { id login inventory { earnedDropRewards {
+			edges { node { status campaign { id } } }
+		} } }
+	}`
+	var result struct {
+		CurrentUser *struct {
+			ID, Login string
+			Inventory *struct {
+				EarnedDropRewards *struct {
+					Edges []struct {
+						Node struct {
+							Status   string
+							Campaign struct{ ID string }
+						}
+					}
+				}
+			}
+		}
+	}
+	if err := c.do(ctx, "TDMManagedLotClaimedCampaigns", query, nil, &result); err != nil {
+		return nil, err
+	}
+	user := result.CurrentUser
+	if user == nil || user.ID != c.Account.UserID || !strings.EqualFold(user.Login, c.Account.Login) ||
+		user.Inventory == nil || user.Inventory.EarnedDropRewards == nil || user.Inventory.EarnedDropRewards.Edges == nil {
+		return nil, fmt.Errorf("Twitch did not confirm account reward history")
+	}
+	var ids []string
+	seen := make(map[string]bool)
+	incomplete := false
+	for _, edge := range user.Inventory.EarnedDropRewards.Edges {
+		node := edge.Node
+		if node.Status != "CLAIMED" {
+			continue
+		}
+		if id := node.Campaign.ID; id == "" {
+			incomplete = true
+		} else if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	if incomplete {
+		return ids, fmt.Errorf("Twitch omitted campaign IDs for some claimed rewards")
+	}
+	return ids, nil
+}
+
 func (c *GQLClient) LotCampaigns(ctx context.Context) ([]LotCampaign, error) {
 	const query = `query TDMManagedLotCatalog {
 		currentUser { dropCampaigns {
@@ -81,6 +131,29 @@ func (c *GQLClient) LotCampaigns(ctx context.Context) ([]LotCampaign, error) {
 		return nil, fmt.Errorf("Twitch did not return a complete catalog")
 	}
 	return result.CurrentUser.DropCampaigns, nil
+}
+
+func (c *GQLClient) LotCampaignByID(ctx context.Context, id string) (*LotCampaign, error) {
+	const query = `query TDMManagedLotCampaign($id: ID!) {
+		currentUser { dropCampaign(id: $id) {
+			id name game { name }
+			timeBasedDrops { id name benefitEdges { benefit { id } } }
+		} }
+	}`
+	var result struct {
+		CurrentUser *struct{ DropCampaign *LotCampaign }
+	}
+	if err := c.do(ctx, "TDMManagedLotCampaign", query, map[string]any{"id": id}, &result); err != nil {
+		return nil, err
+	}
+	if result.CurrentUser == nil {
+		return nil, fmt.Errorf("Twitch did not confirm the catalog account")
+	}
+	campaign := result.CurrentUser.DropCampaign
+	if campaign != nil && !strings.EqualFold(campaign.ID, id) {
+		return nil, fmt.Errorf("Twitch returned a different campaign")
+	}
+	return campaign, nil
 }
 
 // ReadLotInventory uses only the authenticated user's inventory. Catalog

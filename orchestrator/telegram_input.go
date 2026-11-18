@@ -13,11 +13,11 @@ func telegramPrompt(input string) bot.SettingsPanel {
 	kind, ref, _ := strings.Cut(input, ":")
 	prompts := map[string]struct{ title, text, back string }{
 		"lb-code":       {"📋 Код лота", "В карточке лота в Cardinal скопируйте его код, затем вставьте его сюда.", "lot-tools"},
-		"lb-find":       {"🔎 Поиск кампаний", "Введите название игры или кампании. Бот проверит каталог Twitch и сохранённую историю. Если совпадений там нет, он проверит аккаунты из этого лота.", "lb:" + ref + ":games:0"},
-		"lb-inventory":  {"🎒 Поиск в инвентаре", "Введите название кампании или игры. Бот проверит аккаунты из TXT этого лота.", "lb:" + ref + ":tools"},
-		"lot-inventory": {"🎒 Поиск в инвентаре", "На первой строке отправьте название кампании или игры. На второй укажите логин Twitch аккаунта с её наградами.", "lot-tools"},
+		"lb-find":       {"🔎 Поиск кампаний", "Введите название игры или кампании либо вставьте ссылку Twitch Drops. Бот проверит Twitch и сохранённую историю, затем при необходимости проверит аккаунты лота.", "lb:" + ref + ":games:0"},
+		"lb-inventory":  {"🎒 Поиск в инвентаре", "Введите название игры или кампании либо вставьте ссылку Twitch Drops. Бот проверит аккаунты из TXT этого лота.", "lb:" + ref + ":tools"},
+		"lot-inventory": {"🎒 Поиск в инвентаре", "На первой строке отправьте название игры, кампании или ссылку Twitch Drops. На второй укажите логин Twitch аккаунта с её наградами.", "lot-tools"},
 		"lot-catalog":   {"🏷 Кампания в каталоге лотов", "Отправьте название игры первой строкой. Второй строкой укажите ID кампании и название через |. Затем отправьте каждый дроп на отдельной строке.\n\nПример\nWar Thunder\n123 | WTCS Finals\n456 | Supply Crate\n\nЕсли известен точный срок для всей кампании, добавьте строку в формате\nСрок | 2026-11-23T18:00:00+03:00 | HTTPS-ссылка на правило.", "lot-tools"},
-		"lot-discover":  {"🔎 Кампании Twitch", "Введите название игры или кампании. Найденные кампании появятся в каталоге вместе с наградами.", "lot-catalog-page:0"},
+		"lot-discover":  {"🔎 Кампании Twitch", "Введите название игры или кампании либо вставьте ссылку Twitch Drops. Найденные кампании появятся в каталоге вместе с наградами.", "lot-catalog-page:0"},
 		"lot-bundle":    {"🏷 Состав лота", "Первая строка — код лота из Cardinal. Дальше по одной кампании на строку. Для полной кампании укажите её ID. Для части кампании добавьте после ID через пробел только нужные ID наград.\n\nПример\nкод лота\n123\n789 456 457", "lot-tools"},
 		"lot-link":      {"Привязка лота", "Скопируй код из карточки лота в боте Cardinal и отправь сюда.", "lot-preview"},
 		"find":          {"🔎 Поиск игры", "Отправьте одним сообщением: целевой размер пула, затем часть названия игры. После поиска бот предложит выбрать точную категорию.\n\nПример: 100 Hitman", "games"},
@@ -140,22 +140,30 @@ func (s *scheduler) telegramInput(input, text string) bot.SettingsPanel {
 				return retry("Нужны две строки. На второй укажите только логин Twitch.")
 			}
 		}
-		query = strings.TrimSpace(query)
-		if !validLotLabel(query) {
-			return retry("Укажите название игры или кампании.")
+		query, valid := normalizeLotCampaignQuery(query)
+		if !valid {
+			return retry("Укажите название игры, кампании или ссылку Twitch Drops с ID кампании.")
 		}
 		var count int
 		var err error
 		fromLot := kind == "lb-inventory"
 		if !fromLot {
 			count, err = s.discoverLotCampaigns(query, login)
-			fromLot = kind == "lb-find" && count == 0 && !s.hasLotCatalogMatch(query)
+			fromLot = kind == "lb-find" && count == 0 && !s.hasLotCatalogMatch(query, ref)
 			if kind == "lb-find" && !fromLot && count == 0 {
 				err = nil // An existing catalog result remains available during a Twitch outage.
 			}
 		}
 		if fromLot {
+			catalogErr := err
 			count, err = s.discoverLotSampleCampaigns(query, ref)
+			if kind == "lb-find" && err != nil {
+				status := "В каталоге Twitch и сохранённой истории совпадений нет."
+				if catalogErr != nil {
+					status = "Поиск в Twitch не подтвердил кампанию, в сохранённой истории совпадений нет."
+				}
+				return retry(status + "\nНе удалось проверить инвентарь аккаунтов лота. " + err.Error() + ".")
+			}
 		}
 		if err != nil {
 			return retry(err.Error())

@@ -32,6 +32,8 @@ func (s *scheduler) telegramMenu(action string) bot.SettingsPanel {
 		return telegramLotTools()
 	case "lb-list", "lb-open", "lb-start", "lb", "lb-confirm":
 		return s.telegramLotBundle(kind, exportValue)
+	case "lb-scan":
+		return s.telegramLotInventory(exportValue)
 	case "lot-catalog-page":
 		return s.telegramLotCatalog(exportValue)
 	case "lot-catalog-remove", "lot-catalog-remove-confirm", "lot-catalog-remove-cancel":

@@ -16,6 +16,9 @@ type lotBundleDraft struct {
 	Ref, Token, Game string
 	Search           string
 	Selected         map[string]map[string]bool
+	Discovered       map[string]lotCatalogCampaign
+	InventoryIDs     map[string]bool
+	InventoryPartial bool
 }
 
 // Call with the scheduler lock. Removed entries are only available to lots that already use them.
@@ -35,6 +38,22 @@ func (s *scheduler) lotCatalogFor(ref string) map[string]lotCatalogCampaign {
 	}
 	if extended != nil {
 		return extended
+	}
+	return catalog
+}
+
+// Call with the scheduler lock. Keep discoveries in the draft until the operator saves the lot.
+func (s *scheduler) lotBundleCatalog(draft *lotBundleDraft) map[string]lotCatalogCampaign {
+	known := s.lotCatalogFor(draft.Ref)
+	if len(draft.Discovered) == 0 {
+		return known
+	}
+	catalog := maps.Clone(draft.Discovered)
+	for id, item := range known {
+		if discovered, exists := draft.Discovered[id]; exists {
+			item, _ = mergeLotInventoryCampaign(item, discovered)
+		}
+		catalog[id] = item
 	}
 	return catalog
 }
@@ -94,6 +113,32 @@ func (s *scheduler) telegramLotSearchResult(token, query string) bot.SettingsPan
 	}
 	s.mu.Unlock()
 	return s.telegramLotBundle("lb", token+":matches:0")
+}
+
+func (s *scheduler) telegramLotInventory(token string) bot.SettingsPanel {
+	found, partial, err := s.scanLotInventory(token)
+	s.mu.Lock()
+	draft := s.lotBundleDraft
+	if err == nil && draft != nil && draft.Token == token {
+		if draft.Discovered == nil {
+			draft.Discovered = make(map[string]lotCatalogCampaign)
+		}
+		draft.InventoryIDs = make(map[string]bool, len(found))
+		for id, item := range found {
+			if previous, exists := draft.Discovered[id]; exists {
+				item, _ = mergeLotInventoryCampaign(previous, item)
+			}
+			draft.Discovered[id] = item
+			draft.InventoryIDs[id] = true
+		}
+		draft.InventoryPartial = partial
+	}
+	s.mu.Unlock()
+	panel := s.telegramLotBundle("lb", token+":inventory:0")
+	if err != nil && panel.Title == "🎒 Кампании из инвентаря лота" {
+		panel.Text = "⚠️ " + err.Error() + ".\n\n" + panel.Text
+	}
+	return panel
 }
 
 func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
@@ -188,11 +233,12 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 		return ""
 	}
 	view := args[1]
-	catalog := s.lotCatalogFor(draft.Ref)
+	catalog := s.lotBundleCatalog(draft)
 	findCampaign := "prompt:lb-find:" + draft.Token
+	scanInventory := "lb-scan:" + draft.Token
 	if view == "tools" {
 		panel.Title = "⚙️ Состав лота · дополнительно"
-		bundleButton(&panel, "🎒 Искать в аккаунтах этого лота", "prompt:lb-inventory:"+draft.Token)
+		bundleButton(&panel, "🎒 Из инвентаря лота", scanInventory)
 		if draft.Search != "" {
 			bundleButton(&panel, "⬅️ К результатам поиска", link("matches", "0"))
 		}
@@ -203,13 +249,18 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 		}
 		return panel
 	}
-	if view == "matches" {
-		panel.Title = "🔎 Результаты поиска"
-		panel.Text += "Запрос · " + brief(draft.Search, 100)
-		query := strings.ToLower(draft.Search)
+	if view == "matches" || view == "inventory" {
+		inventory := view == "inventory"
+		if inventory {
+			panel.Title = "🎒 Кампании из инвентаря лота"
+			panel.Text += "Выберите игру и кампанию по результатам проверки одного аккаунта."
+		} else {
+			panel.Title = "🔎 Результаты поиска"
+			panel.Text += "Запрос · " + brief(draft.Search, 100)
+		}
 		var ids []string
 		for id, item := range catalog {
-			if query != "" && (strings.Contains(strings.ToLower(item.Name), query) || strings.Contains(strings.ToLower(item.Game), query)) {
+			if (inventory && draft.InventoryIDs[id]) || (!inventory && lotCampaignMatches(draft.Search, id, item.Game, item.Name)) {
 				ids = append(ids, id)
 			}
 		}
@@ -223,14 +274,25 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 			label := brief(item.Game, 22) + " · " + brief(item.Name, 37)
 			items = append(items, bot.SettingsButton{Label: label, Action: link("pick", gameRef(id), "0")})
 		}
-		if len(items) == 0 {
+		if inventory && draft.InventoryPartial {
+			panel.Text += "\nTwitch вернул только часть данных о кампаниях и ранее полученных наградах."
+		}
+		if inventory && draft.InventoryIDs != nil && len(items) == 0 {
+			panel.Text += "\nВ доступных данных этого аккаунта кампаний для выбора нет."
+		} else if !inventory && len(items) == 0 {
 			panel.Text += "\nСовпадений нет. Попробуйте другое название."
-		} else if len(draft.Selected) > 0 {
+		} else if len(items) > 0 && len(draft.Selected) > 0 {
 			panel.Text += "\nВыбор кампании другой игры сбросит черновик выбора."
 		}
-		bundlePageRows(&panel, arg(2), items, func(page int) string { return link("matches", strconv.Itoa(page)) })
-		bundleButton(&panel, "🔎 Новый поиск", findCampaign)
-		bundleButton(&panel, "⚙️ Дополнительно", link("tools"))
+		bundlePageRows(&panel, arg(2), items, func(page int) string { return link(view, strconv.Itoa(page)) })
+		if inventory {
+			bundleButton(&panel, "🔄 Проверить ещё раз", scanInventory)
+			bundleButton(&panel, "🔎 Найти кампанию", findCampaign)
+		} else {
+			bundleButton(&panel, "🔎 Новый поиск", findCampaign)
+			bundleButton(&panel, "🎒 Из инвентаря лота", scanInventory)
+			bundleButton(&panel, "⚙️ Дополнительно", link("tools"))
+		}
 		if draft.Game == "" {
 			bundleButton(&panel, "⬅️ К выбору игры", link("games", "0"))
 		} else {
@@ -290,6 +352,7 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 			panel.Text += " Каталог пока пуст."
 		}
 		bundlePageRows(&panel, arg(2), items, func(page int) string { return link("games", strconv.Itoa(page)) })
+		bundleButton(&panel, "🎒 Из инвентаря лота", scanInventory)
 		bundleButton(&panel, "🔎 Найти кампанию", findCampaign)
 		bundleButton(&panel, "⚙️ Дополнительно", link("tools"))
 		if draft.Game != "" {
@@ -345,11 +408,11 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 			}
 			panel.Text = draftHeader()
 			panel.Text += fmt.Sprintf("🎯 %s\nОтмечено наград: %d из %d", item.Name, len(selected), len(item.Rewards))
-			if _, inCatalog := s.state.LotCatalog[id]; !inCatalog {
+			if _, inCatalog := s.state.LotCatalog[id]; !inCatalog && draft.Discovered[id].Game == "" {
 				panel.Text += "\nКампания открыта из сохранённого состава лота."
 			}
 			if item.InventoryOnly {
-				panel.Text += "\nПоказаны награды из инвентаря. Сверьте их с обещанным составом лота."
+				panel.Text += "\nКампания найдена по инвентарю. Сверьте список наград с составом лота."
 			}
 			var items []bot.SettingsButton
 			for i, r := range item.Rewards {
@@ -368,6 +431,9 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 			}
 			if len(draft.Selected) > 0 {
 				bundleButton(&panel, "🔎 Просмотреть и сохранить", link("review"))
+			}
+			if draft.InventoryIDs[id] {
+				bundleButton(&panel, "⬅️ К результатам инвентаря", link("inventory", "0"))
 			}
 			bundleButton(&panel, "⬅️ К кампаниям", link("campaigns", "0"))
 			return panel
@@ -410,7 +476,7 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 		} else if len(lines) == 0 || len(lines) > 20 || count > 100 {
 			panel.Text += "Выберите от 1 до 20 кампаний и не больше 100 наград."
 		} else if view == "save" {
-			if err := s.saveLotBundleLocked(draft.Ref, lines); err != nil {
+			if err := s.saveLotBundleFromCatalogLocked(draft.Ref, lines, catalog, draft.Discovered); err != nil {
 				panel.Text += "⚠️ " + err.Error()
 			} else {
 				s.lotBundleDraft = nil
@@ -434,7 +500,7 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 			mark = "✓ "
 		}
 		label := fmt.Sprintf("%s%s · %d/%d", mark, brief(item.Name, 49), len(draft.Selected[id]), len(item.Rewards))
-		if _, inCatalog := s.state.LotCatalog[id]; !inCatalog {
+		if _, inCatalog := s.state.LotCatalog[id]; !inCatalog && draft.Discovered[id].Game == "" {
 			label += " · из состава лота"
 		}
 		items = append(items, bot.SettingsButton{Label: label, Action: link("rewards", gameRef(id), "0")})
@@ -450,6 +516,7 @@ func (s *scheduler) telegramLotBundle(kind, value string) bot.SettingsPanel {
 		panel.Text += "\n\nВ черновике нет отмеченных наград. Сохранённый состав действует до сохранения нового."
 	}
 	bundleButton(&panel, "🎮 Выбрать игру", link("games", "0"))
+	bundleButton(&panel, "🎒 Из инвентаря лота", scanInventory)
 	bundleButton(&panel, "🔎 Найти кампанию", findCampaign)
 	bundleButton(&panel, "Отмена", link("cancel"))
 	return panel
